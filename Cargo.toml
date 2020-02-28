@@ -11,4 +11,3 @@ rust-crypto = "^0.2.36"
 clipboard = "^0.5"
 serde = { version = "^1", features = ["derive"] }
 bincode = "^1"
-rand = "0.7"

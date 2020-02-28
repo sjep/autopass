@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::{fs, fs::File};
 use std::io::prelude::*;
 
-use rand::{RngCore, rngs::OsRng};
 use serde::{Serialize, Deserialize};
 use crypto::aessafe::{AesSafe256Encryptor, AesSafe256Decryptor};
 use crypto::symmetriccipher::{BlockDecryptor, BlockEncryptor};
@@ -69,7 +68,7 @@ impl ServiceEntry {
         let encrypt = AesSafe256Encryptor::new(key);
         let blocksize = encrypt.block_size();
         let leftover = blocksize - bin.len() % blocksize;
-        for i in 0..leftover {
+        for _ in 0..leftover {
             bin.push(0);
         }
         let blocks = bin.len() / blocksize;
@@ -100,27 +99,20 @@ impl ServiceEntry {
     pub fn save(&self, key: &[u8]) {
         let path = Path::new(PASS_PATH);
         if !path.exists() {
-            fs::create_dir_all(path);
+            fs::create_dir_all(path).unwrap();
         }
 
         let encrypted = self.encrypt(key);
         let full_path = full_path(&self.name);
         let mut file = File::create(full_path).unwrap();
-        file.write_all(&encrypted);
+        file.write_all(&encrypted).unwrap();
     }
 
-    pub fn load(name: &str, key: &[u8]) -> Result<Self, &'static str> {
-        let mut file = match File::open(full_path(name)) {
-            Err(_) => return Err("Error opening file"),
-            Ok(f) => f
-        };
+    pub fn load(file: &mut File, key: &[u8]) -> Result<Self, &'static str> {
         let mut buffer = vec![];
-        file.read_to_end(&mut buffer);
+        file.read_to_end(&mut buffer).unwrap();
         match Self::decrypt(&buffer, key) {
-            Some(entry) => match entry.name == name {
-                true => Ok(entry),
-                false => Err("Wrong password")
-            },
+            Some(entry) => Ok(entry),
             None => Err("Wrong password")
         }
     }
@@ -132,15 +124,19 @@ impl ServiceEntry {
     fn from_binary(bin: &[u8]) -> Option<Self> {
         match bincode::deserialize(bin) {
             Ok(entry) => Some(entry),
-            Err(err) => None
+            Err(_) => None
         }
+    }
+
+    pub fn get_name(&self) -> &str {
+        &&self.name
     }
 
     pub fn get_pass(&self, clipboard: bool) -> Option<&str> {
         match clipboard {
             true => {
                 let mut clipboard = OSXClipboardContext::new().unwrap();
-                clipboard.set_contents(self.pass.to_string());
+                clipboard.set_contents(self.pass.to_string()).unwrap();
                 None
             },
             false => {

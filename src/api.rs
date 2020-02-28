@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::{fs, fs::{File, read_dir, DirEntry}};
+use std::path::Path;
+use std::fs::{File, read_dir};
 
 use crate::service::{ServiceEntry, full_path, PASS_PATH};
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
@@ -61,12 +61,19 @@ pub fn new(name: &str,
 pub fn get(name: &str,
            pass: &str,
            clipboard: bool) -> Result<Option<String>, &'static str> {
-    if !full_path(name).exists() {
+    let filename = full_path(name);
+    if !filename.exists() {
         return Err("Service doesn't exist");
     }
+
+    let mut file = match File::open(filename) {
+        Err(_) => return Err("Error opening file"),
+        Ok(f) => f
+    };
     let key = create_key(pass);
-    let entry = match ServiceEntry::load(name, &key) {
-        Ok(e) => e,
+
+    let entry = match ServiceEntry::load(&mut file, &key) {
+        Ok(entry) => entry,
         Err(s) => return Err(s)
     };
     Ok(match entry.get_pass(clipboard) {
@@ -80,10 +87,14 @@ pub fn list(pass: &str) -> Vec<String> {
     if !dir.exists() {
         return vec![];
     }
-    let names: Vec<String> = vec![];
+    let mut names: Vec<String> = vec![];
     for fbuf in read_dir(dir).unwrap() {
         let filename = fbuf.unwrap().path();
-
+        let mut file = File::open(filename).unwrap();
+        let key = create_key(pass);
+        if let Ok(entry) = ServiceEntry::load(&mut file, &key) {
+            names.push(entry.get_name().to_string());
+        }
     }
     names
 }
