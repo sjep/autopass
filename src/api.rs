@@ -14,13 +14,27 @@ fn create_key(pass: &str) -> Vec<u8> {
     key
 }
 
+fn load_entry(name: &str, pass: &str) -> Result<ServiceEntry, &'static str> {
+    let filename = full_path(name);
+    if !filename.exists() {
+        return Err("Service doesn't exist");
+    }
+
+    let mut file = match File::open(filename) {
+        Err(_) => return Err("Error opening file"),
+        Ok(f) => f
+    };
+    let key = create_key(pass);
+
+    ServiceEntry::load(&mut file, &key)
+}
 
 pub fn new(name: &str,
            pass: &str,
            text_mode: &TextMode,
            len: usize,
-           kvs: Vec<(&str, &str)>,
-           service_pass: Option<&str>) -> Result<(), String> {
+           kvs: &[(&str, &str)],
+           service_pass: Option<&str>) -> Result<ServiceEntry, String> {
 
     if full_path(name).exists() {
         return Err(format!("Service '{}' already exists", name))
@@ -55,24 +69,13 @@ pub fn new(name: &str,
         text_mode
     );
     entry.save(&h2);
-    Ok(())
+    Ok(entry)
 }
 
 pub fn get(name: &str,
            pass: &str,
            clipboard: bool) -> Result<Option<String>, &'static str> {
-    let filename = full_path(name);
-    if !filename.exists() {
-        return Err("Service doesn't exist");
-    }
-
-    let mut file = match File::open(filename) {
-        Err(_) => return Err("Error opening file"),
-        Ok(f) => f
-    };
-    let key = create_key(pass);
-
-    let entry = match ServiceEntry::load(&mut file, &key) {
+    let entry = match load_entry(&name, &pass) {
         Ok(entry) => entry,
         Err(s) => return Err(s)
     };
@@ -80,6 +83,26 @@ pub fn get(name: &str,
         Some(pass) => Some(pass.to_string()),
         None => None
     })
+}
+
+pub fn get_kvs(name: &str,
+               pass: &str) -> Result<HashMap<String, String>, &'static str> {
+    match load_entry(name, pass) {
+        Ok(entry) => Ok(entry.get_kvs().clone()),
+        Err(s) => Err(s)
+    }
+}
+
+pub fn set_kvs(name: &str,
+               pass: &str,
+               kvs: &[(&str, &str)]) -> Result<(), &'static str> {
+    match load_entry(&name, &pass) {
+        Ok(mut entry) => {
+            entry.set_kvs(kvs);
+            Ok(())
+        },
+        Err(s) => Err(s)
+    }
 }
 
 pub fn list(pass: &str) -> Vec<String> {

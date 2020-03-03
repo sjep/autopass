@@ -22,13 +22,13 @@ pub enum TextMode {
 
 fn set_alphanumeric(map: &mut Vec<u8>) {
     for i in 48..(48 + 10) {
-        map.push(i); 
+        map.push(i);
     }
     for i in 65..(65 + 26) {
-        map.push(i); 
+        map.push(i);
     }
     for i in 97..(97 + 26) {
-        map.push(i); 
+        map.push(i);
     }
 }
 
@@ -39,7 +39,7 @@ fn set_alphanumeric_underscore(map: &mut Vec<u8>) {
 
 fn set_no_whitespace(map: &mut Vec<u8>) {
     for i in 48..127 {
-        map.push(i); 
+        map.push(i);
     }
 }
 

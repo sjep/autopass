@@ -11,3 +11,5 @@ rust-crypto = "^0.2.36"
 clipboard = "^0.5"
 serde = { version = "^1", features = ["derive"] }
 bincode = "^1"
+clap = "2.33.0"
+termion = "1.5.5"

@@ -45,7 +45,7 @@ impl ServiceEntry {
     pub fn new(name: &str,
                pass: &str,
                nonce: u8,
-               kvs: Vec<(&str, &str)>,
+               kvs: &[(&str, &str)],
                len: usize,
                text_mode: &TextMode) -> Self {
         let mut kv: HashMap<String, String> = HashMap::new();
@@ -129,7 +129,17 @@ impl ServiceEntry {
     }
 
     pub fn get_name(&self) -> &str {
-        &&self.name
+        &self.name
+    }
+
+    pub fn get_kvs(&self) -> &HashMap<String, String> {
+        &self.kv
+    }
+
+    pub fn set_kvs(&mut self, kvs: &[(&str, &str)]) {
+        for (key, value) in kvs.iter() {
+            self.kv.insert(key.to_string(), value.to_string());
+        }
     }
 
     pub fn get_pass(&self, clipboard: bool) -> Option<&str> {
