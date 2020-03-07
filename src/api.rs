@@ -14,6 +14,26 @@ fn create_key(pass: &str) -> Vec<u8> {
     key
 }
 
+fn generate_pass(name: &str,
+                 pass: &str,
+                 nonce: u8,
+                 len: usize,
+                 text_mode: &TextMode) -> String {
+    let mut digest = get_digest(HashAlg::SHA256);
+    let mut h1 = vec![0; digest.output_bytes()];
+    digest.input(name.as_bytes());
+    digest.result(&mut h1);
+    digest.reset();
+    let h2 = create_key(pass);
+    let mut pwbin = vec![0; digest.output_bytes()];
+    digest.input(std::slice::from_ref(&nonce));
+    digest.input(&h1);
+    digest.input(&h2);
+    digest.result(&mut pwbin);
+    digest.reset();
+    bin_to_str(&pwbin, text_mode, len)
+}
+
 fn load_entry(name: &str, pass: &str) -> Result<ServiceEntry, &'static str> {
     let filename = full_path(name);
     if !filename.exists() {
@@ -40,34 +60,20 @@ pub fn new(name: &str,
         return Err(format!("Service '{}' already exists", name))
     }
 
-    let nonce: u8 = 0;
-    let mut digest = get_digest(HashAlg::SHA256);
-    let mut h1 = vec![0; digest.output_bytes()];
-    let h2 = create_key(pass);
-    digest.input(name.as_bytes());
-    digest.result(&mut h1);
-    digest.reset();
     let password = match service_pass {
-        Some(s) => s.to_string(),
-        None => {
-            let mut pwbin = vec![0; digest.output_bytes()];
-            digest.input(std::slice::from_ref(&nonce));
-            digest.input(&h1);
-            digest.input(&h2);
-            digest.result(&mut pwbin);
-            digest.reset();
-            bin_to_str(&pwbin, text_mode, len)
-        }
+        None => generate_pass(name, pass, 0u8, len, text_mode),
+        Some(s) => s.to_string()
     };
 
     let entry = ServiceEntry::new(
         name,
         &password,
-        nonce,
+        0u8,
         kvs,
         len,
         text_mode
     );
+    let h2 = create_key(pass);
     entry.save(&h2);
     Ok(entry)
 }
@@ -85,12 +91,9 @@ pub fn get(name: &str,
     })
 }
 
-pub fn get_kvs(name: &str,
-               pass: &str) -> Result<HashMap<String, String>, &'static str> {
-    match load_entry(name, pass) {
-        Ok(entry) => Ok(entry.get_kvs().clone()),
-        Err(s) => Err(s)
-    }
+pub fn get_all(name: &str,
+               pass: &str) -> Result<ServiceEntry, &'static str> {
+    load_entry(name, pass)
 }
 
 pub fn set_kvs(name: &str,
@@ -99,6 +102,7 @@ pub fn set_kvs(name: &str,
     match load_entry(&name, &pass) {
         Ok(mut entry) => {
             entry.set_kvs(kvs);
+            entry.save(&create_key(pass));
             Ok(())
         },
         Err(s) => Err(s)
@@ -120,4 +124,24 @@ pub fn list(pass: &str) -> Vec<String> {
         }
     }
     names
+}
+
+pub fn upgrade(name: &str, pass: &str, service_pass: Option<&str>) -> Result<(), &'static str> {
+    match load_entry(&name, &pass) {
+        Ok(mut entry) => {
+            let new_pass = match service_pass {
+                Some(s) => s.to_string(),
+                None => {
+                    let nonce = entry.uptick();
+                    generate_pass(name, pass, nonce, entry.get_len(),  entry.get_text_mode())
+                }
+            };
+            entry.set_pass(&new_pass);
+            entry.save(&create_key(pass));
+            Ok(())
+        },
+        Err(s) => {
+            Err(s)
+        }
+    }
 }

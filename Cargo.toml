@@ -13,3 +13,4 @@ serde = { version = "^1", features = ["derive"] }
 bincode = "^1"
 clap = "2.33.0"
 termion = "1.5.5"
+dirs = "2.0.2"

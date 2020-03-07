@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::fmt;
 use std::{fs, fs::File};
 use std::io::prelude::*;
+use std::path::{Path, PathBuf};
 
 use serde::{Serialize, Deserialize};
 use crypto::aessafe::{AesSafe256Encryptor, AesSafe256Decryptor};
@@ -26,7 +27,17 @@ fn filename(name: &str) -> String {
 
 
 pub fn full_path(name: &str) -> PathBuf {
-    Path::join(Path::new(PASS_PATH), Path::new(&filename(name)))
+    let base_dir = Path::join(&dirs::home_dir().unwrap(), Path::new(PASS_PATH));
+    Path::join(&base_dir, Path::new(&filename(name)))
+}
+
+
+pub fn create_key(pass: &str) -> Vec<u8> {
+    let mut digest = get_digest(HashAlg::SHA256);
+    let mut key = vec![0; digest.output_bytes()];
+    digest.input(pass.as_bytes());
+    digest.result(&mut key);
+    key
 }
 
 
@@ -155,7 +166,36 @@ impl ServiceEntry {
         }
     }
 
+    pub fn uptick(&mut self) -> u8 {
+        self.nonce += 1;
+        self.nonce
+    }
+
+    pub fn get_text_mode(&self) -> &TextMode {
+        &self.text_mode
+    }
+
+    pub fn get_len(&self) -> usize {
+        self.len
+    }
+
+    pub fn set_pass(&mut self, pass: &str) {
+        self.pass = pass.to_string();
+    }
+
     pub fn to_string(&self) -> String {
         format!("{}: {:?}", self.name, self.kv)
     }
 }
+
+impl fmt::Display for ServiceEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut kvs = String::new();
+        for (key, value) in self.kv.iter() {
+            kvs = format!("{}{}: {}\n", kvs, key, value);
+        }
+        f.write_str(
+            &format!("Name: {}\nPass: {}\nKey value pairs:\n{}", self.name, self.pass, kvs))
+    }
+}
+
