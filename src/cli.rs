@@ -9,7 +9,7 @@ use crate::api;
 use crate::hash::TextMode;
 
 
-const PASS_ENV_VAR: &'static str = "PASS_PASS";
+const PASS_ENV_VAR: &'static str = "AP_PWD";
 
 fn read_pass_raw(prompt: &str) -> String {
     let stdout = stdout();
@@ -206,7 +206,9 @@ fn upgrade_cmd(matches: &ArgMatches) {
     let pass = read_pass(false).unwrap();
     match api::upgrade(name, &pass, set_password) {
         Err(s) => println!("{}", s),
-        _ => {}
+        Ok((old_pass, new_pass)) => {
+            println!("Old pass: {}\nNew pass: {}", old_pass, new_pass);
+        }
     };
 }
 

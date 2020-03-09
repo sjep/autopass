@@ -126,9 +126,12 @@ pub fn list(pass: &str) -> Vec<String> {
     names
 }
 
-pub fn upgrade(name: &str, pass: &str, service_pass: Option<&str>) -> Result<(), &'static str> {
+pub fn upgrade(name: &str,
+               pass: &str,
+               service_pass: Option<&str>) -> Result<(String, String), &'static str> {
     match load_entry(&name, &pass) {
         Ok(mut entry) => {
+
             let new_pass = match service_pass {
                 Some(s) => s.to_string(),
                 None => {
@@ -136,9 +139,10 @@ pub fn upgrade(name: &str, pass: &str, service_pass: Option<&str>) -> Result<(),
                     generate_pass(name, pass, nonce, entry.get_len(),  entry.get_text_mode())
                 }
             };
+            let old_pass = entry.get_pass(false).unwrap().to_string();
             entry.set_pass(&new_pass);
             entry.save(&create_key(pass));
-            Ok(())
+            Ok((old_pass, new_pass))
         },
         Err(s) => {
             Err(s)
