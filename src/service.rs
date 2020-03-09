@@ -43,6 +43,7 @@ pub fn create_key(pass: &str) -> Vec<u8> {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ServiceEntry {
+    pad: u16,
     name: String,
     pass: String,
     nonce: u8,
@@ -64,6 +65,7 @@ impl ServiceEntry {
             kv.insert(key.to_string(), val.to_string());
         }
         ServiceEntry{
+            pad: 0u16,
             name: name.to_string(),
             pass: pass.to_string(),
             nonce,
@@ -123,7 +125,12 @@ impl ServiceEntry {
         let mut buffer = vec![];
         file.read_to_end(&mut buffer).unwrap();
         match Self::decrypt(&buffer, key) {
-            Some(entry) => Ok(entry),
+            Some(entry) => {
+                match entry.pad == 0 {
+                    true => Ok(entry),
+                    false => Err("Wrong password")
+                }
+            },
             None => Err("Wrong password")
         }
     }
