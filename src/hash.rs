@@ -43,8 +43,8 @@ fn set_no_whitespace(map: &mut Vec<u8>) {
     }
 }
 
-pub fn bin_to_str(data: &[u8], text_mode: &TextMode, len: usize) -> String {
-    assert!(len <= data.len());
+pub fn bin_to_str(data: &[u8], text_mode: &TextMode, len: u8) -> String {
+    assert!(len as usize <= data.len());
     let mut map: Vec<u8> = vec![];
     match text_mode {
         TextMode::AlphaNumeric => {
@@ -60,7 +60,7 @@ pub fn bin_to_str(data: &[u8], text_mode: &TextMode, len: usize) -> String {
 
     let count = map.len() as f64;
     let mut res: Vec<u8> = vec![];
-    for i in data[0..len].iter() {
+    for i in data[0..(len as usize)].iter() {
         res.push(map[((*i as f64 / 256.0) * count) as usize]);
     }
     std::str::from_utf8(&res).unwrap().to_string()  

@@ -17,7 +17,7 @@ fn create_key(pass: &str) -> Vec<u8> {
 fn generate_pass(name: &str,
                  pass: &str,
                  nonce: u8,
-                 len: usize,
+                 len: u8,
                  text_mode: &TextMode) -> String {
     let mut digest = get_digest(HashAlg::SHA256);
     let mut h1 = vec![0; digest.output_bytes()];
@@ -52,7 +52,7 @@ fn load_entry(name: &str, pass: &str) -> Result<ServiceEntry, &'static str> {
 pub fn new(name: &str,
            pass: &str,
            text_mode: &TextMode,
-           len: usize,
+           len: u8,
            kvs: &[(&str, &str)],
            service_pass: Option<&str>) -> Result<ServiceEntry, String> {
 

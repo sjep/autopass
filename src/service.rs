@@ -47,7 +47,7 @@ pub struct ServiceEntry {
     pass: String,
     nonce: u8,
     kv: HashMap<String, String>,
-    len: usize,
+    len: u8,
     text_mode: TextMode
 }
 
@@ -57,7 +57,7 @@ impl ServiceEntry {
                pass: &str,
                nonce: u8,
                kvs: &[(&str, &str)],
-               len: usize,
+               len: u8,
                text_mode: &TextMode) -> Self {
         let mut kv: HashMap<String, String> = HashMap::new();
         for (key, val) in kvs {
@@ -175,7 +175,7 @@ impl ServiceEntry {
         &self.text_mode
     }
 
-    pub fn get_len(&self) -> usize {
+    pub fn get_len(&self) -> u8 {
         self.len
     }
 

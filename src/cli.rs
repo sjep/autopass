@@ -108,12 +108,20 @@ fn new_cmd(matches: &ArgMatches) {
         _ => TextMode::NoWhiteSpace
     };
 
-    let len = match usize::from_str(matches.value_of("length").unwrap()) {
+    let len: u8 = match usize::from_str(matches.value_of("length").unwrap()) {
         Err(_) => {
             println!("Length provided not an integer");
             return;
         },
-        Ok(l) => l
+        Ok(l) => {
+            match l > 256 {
+                true => {
+                    println!("Max length allowed is 256");
+                    return;
+                },
+                false => l as u8
+            }
+        }
     };
     let mut valid = true;
     let kvs: Vec<(&str, &str)> = match matches.values_of("kvs") {
