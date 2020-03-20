@@ -1,9 +1,13 @@
-use std::collections::HashMap;
 use std::path::Path;
-use std::fs::{File, read_dir};
+use std::fs::{File, read_dir, remove_file};
 
 use crate::service::{ServiceEntry, full_path, PASS_PATH};
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
+
+
+pub fn exists(name: &str) -> bool {
+    full_path(name).exists()
+}
 
 
 fn create_key(pass: &str) -> Vec<u8> {
@@ -35,11 +39,11 @@ fn generate_pass(name: &str,
 }
 
 fn load_entry(name: &str, pass: &str) -> Result<ServiceEntry, &'static str> {
-    let filename = full_path(name);
-    if !filename.exists() {
+    if !exists(name) {
         return Err("Service doesn't exist");
     }
 
+    let filename = full_path(name);
     let mut file = match File::open(filename) {
         Err(_) => return Err("Error opening file"),
         Ok(f) => f
@@ -56,7 +60,7 @@ pub fn new(name: &str,
            kvs: &[(&str, &str)],
            service_pass: Option<&str>) -> Result<ServiceEntry, String> {
 
-    if full_path(name).exists() {
+    if exists(name) {
         return Err(format!("Service '{}' already exists", name))
     }
 
@@ -98,10 +102,11 @@ pub fn get_all(name: &str,
 
 pub fn set_kvs(name: &str,
                pass: &str,
-               kvs: &[(&str, &str)]) -> Result<(), &'static str> {
+               kvs: &[(&str, &str)],
+               reset: bool) -> Result<(), &'static str> {
     match load_entry(&name, &pass) {
         Ok(mut entry) => {
-            entry.set_kvs(kvs);
+            entry.set_kvs(kvs, reset);
             entry.save(&create_key(pass));
             Ok(())
         },
@@ -148,4 +153,11 @@ pub fn upgrade(name: &str,
             Err(s)
         }
     }
+}
+
+pub fn delete(name: &str) -> Result<(), String> {
+   match remove_file(full_path(name)) {
+       Ok(_) => Ok(()),
+       Err(e) => Err(e.to_string())
+   }
 }

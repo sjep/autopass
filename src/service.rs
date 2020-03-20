@@ -4,13 +4,19 @@ use std::{fs, fs::File};
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
-use serde::{Serialize, Deserialize};
-use crypto::aessafe::{AesSafe256Encryptor, AesSafe256Decryptor};
-use crypto::symmetriccipher::{BlockDecryptor, BlockEncryptor};
 use clipboard::ClipboardProvider;
 use clipboard::osx_clipboard::OSXClipboardContext;
 
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
+
+use crypto::blockmodes::NoPadding;
+use crypto::aes::{cbc_decryptor, cbc_encryptor, KeySize};
+use crypto::buffer::{BufferResult, RefReadBuffer, RefWriteBuffer};
+
+use rand::{RngCore, SeedableRng};
+use rand::rngs::StdRng;
+
+use serde::{Serialize, Deserialize};
 
 
 pub const PASS_PATH: &str = ".pass";
@@ -32,12 +38,10 @@ pub fn full_path(name: &str) -> PathBuf {
 }
 
 
-pub fn create_key(pass: &str) -> Vec<u8> {
-    let mut digest = get_digest(HashAlg::SHA256);
-    let mut key = vec![0; digest.output_bytes()];
-    digest.input(pass.as_bytes());
-    digest.result(&mut key);
-    key
+#[derive(Deserialize, Serialize, Debug)]
+pub struct ServiceEncrypted {
+    iv: [u8; 16],
+    cyphertext: Vec<u8>
 }
 
 
@@ -65,7 +69,7 @@ impl ServiceEntry {
             kv.insert(key.to_string(), val.to_string());
         }
         ServiceEntry{
-            pad: 0u16,
+            pad: 0,
             name: name.to_string(),
             pass: pass.to_string(),
             nonce,
@@ -75,38 +79,53 @@ impl ServiceEntry {
         }
     }
 
-    fn encrypt(&self, key: &[u8]) -> Vec<u8> {
+    fn encrypt(&self, key: &[u8]) -> ServiceEncrypted {
         let mut bin = self.to_binary();
 
-        let encrypt = AesSafe256Encryptor::new(key);
-        let blocksize = encrypt.block_size();
+        let mut gen: StdRng = StdRng::from_seed([5u8; 32]);
+        let mut iv: [u8; 16] = [0; 16];
+        gen.fill_bytes(&mut iv);
+
+        let blocksize = 16;
+
         let leftover = blocksize - bin.len() % blocksize;
         for _ in 0..leftover {
             bin.push(0);
         }
-        let blocks = bin.len() / blocksize;
-        let mut out = vec![0; blocks * blocksize];
-        for i in 0..blocks {
-            let inp: &[u8] = &bin[i * blocksize..(i + 1) * blocksize];
-            let outp: &mut [u8] = &mut out[i * blocksize..(i + 1) * blocksize];
-            encrypt.encrypt_block(inp, outp);
+
+        let mut cyphertext = vec![0; bin.len()];
+
+        let mut encryptor = cbc_encryptor(KeySize::KeySize256, &key, &iv, NoPadding);
+        match encryptor.encrypt(&mut RefReadBuffer::new(&bin),
+                                &mut RefWriteBuffer::new(&mut cyphertext),
+                                true) {
+            Ok(buf_res) => if let BufferResult::BufferOverflow = buf_res {
+                assert!(false, "Buffer incorrect size. Encrypt aborted");
+            },
+            Err(e) => {
+                assert!(false, "Encrypt Error: {:?}", e);
+            }
         }
-        out
+        ServiceEncrypted{iv, cyphertext}
     }
 
-    fn decrypt(encrypted: &[u8], key: &[u8]) -> Option<Self> {
-        let decrypt = AesSafe256Decryptor::new(key);
-        let blocksize = decrypt.block_size();
-        let blocks = encrypted.len() / blocksize;
-
-        let mut out = vec![0; blocks * blocksize];
-        for i in 0..blocks {
-            let inp: &[u8] = &encrypted[i * blocksize..(i + 1) * blocksize];
-            let outp: &mut [u8] = &mut out[i * blocksize..(i + 1) * blocksize];
-            decrypt.decrypt_block(inp, outp);
+    fn decrypt(service_encrypted: &ServiceEncrypted, key: &[u8]) -> Option<Self> {
+        let iv = &service_encrypted.iv;
+        let cyphertext = &service_encrypted.cyphertext;
+        let mut decryptor = cbc_decryptor(KeySize::KeySize256, &key, iv, NoPadding);
+        let mut plaintext = vec![0; cyphertext.len()];
+        match decryptor.decrypt(&mut RefReadBuffer::new(cyphertext),
+                                &mut RefWriteBuffer::new(&mut plaintext),
+                                true) {
+            Ok(buf_res) => if let BufferResult::BufferOverflow = buf_res {
+                assert!(false, "Buffer incorrect size. Decrypt aborted");
+            },
+            Err(e) => {
+                assert!(false, "Decrypt Error: {:?}", e);
+            }
         }
 
-        Self::from_binary(&out)
+        Self::from_binary(&plaintext)
     }
 
     pub fn save(&self, key: &[u8]) {
@@ -116,15 +135,17 @@ impl ServiceEntry {
         }
 
         let encrypted = self.encrypt(key);
+        let data = bincode::serialize(&encrypted).unwrap();
         let full_path = full_path(&self.name);
         let mut file = File::create(full_path).unwrap();
-        file.write_all(&encrypted).unwrap();
+        file.write_all(&data).unwrap();
     }
 
     pub fn load(file: &mut File, key: &[u8]) -> Result<Self, &'static str> {
         let mut buffer = vec![];
         file.read_to_end(&mut buffer).unwrap();
-        match Self::decrypt(&buffer, key) {
+        let service_encrypted: ServiceEncrypted = bincode::deserialize(&buffer).unwrap();
+        match Self::decrypt(&service_encrypted, key) {
             Some(entry) => {
                 match entry.pad == 0 {
                     true => Ok(entry),
@@ -154,7 +175,10 @@ impl ServiceEntry {
         &self.kv
     }
 
-    pub fn set_kvs(&mut self, kvs: &[(&str, &str)]) {
+    pub fn set_kvs(&mut self, kvs: &[(&str, &str)], reset: bool) {
+        if reset {
+            self.kv.clear();
+        }
         for (key, value) in kvs.iter() {
             self.kv.insert(key.to_string(), value.to_string());
         }

@@ -1,5 +1,5 @@
 use std::env;
-use std::io::{self, stdin, stdout, Write};
+use std::io::{stdin, stdout, Write};
 use std::str::FromStr;
 
 use clap::{Arg, App, SubCommand, ArgMatches};
@@ -100,6 +100,10 @@ fn fetch_kvs<'a>(matches: &'a ArgMatches) -> Result<Vec<(&'a str, &'a str)>, &'s
 fn new_cmd(matches: &ArgMatches) {
     let name = matches.value_of("name").unwrap();
     println!("Adding '{}' as new service", name);
+    if api::exists(name) {
+        println!("{} already exists", name);
+        return;
+    }
 
     let text_mode = match matches.value_of("text_mode").unwrap() {
         "alphanumeric" => TextMode::AlphaNumeric,
@@ -123,25 +127,13 @@ fn new_cmd(matches: &ArgMatches) {
             }
         }
     };
-    let mut valid = true;
-    let kvs: Vec<(&str, &str)> = match matches.values_of("kvs") {
-        None => vec![],
-        Some(v) => v.map(|elem| {
-            let eqidx = match elem.find("=") {
-                None => {
-                    println!("{} must be of the form KEY=VALUE", elem);
-                    valid = false;
-                    0
-                },
-                Some(idx) => idx
-            };
-            (&elem[0..eqidx], &elem[eqidx + 1..elem.len()])
-        }).collect()
+    let kvs: Vec<(&str, &str)> = match fetch_kvs(&matches) {
+        Ok(k) => k,
+        Err(s) => {
+            println!("{}", s);
+            return;
+        }
     };
-    if !valid {
-        println!("Key value pairs must be of the form KEY=VALUE");
-        return;
-    }
 
     let set_password = matches.value_of("set-password");
 
@@ -160,8 +152,14 @@ fn new_cmd(matches: &ArgMatches) {
 
 
 fn get_cmd(matches: &ArgMatches) {
-    let clipboard = matches.is_present("clipboard");
     let name = matches.value_of("name").unwrap();
+    if !api::exists(name) {
+        println!("{} does not exist", name);
+        return;
+    }
+
+    let clipboard = matches.is_present("clipboard");
+
     let all = matches.is_present("all");
     let pass = read_pass(false).unwrap();
     match all {
@@ -184,7 +182,7 @@ fn get_cmd(matches: &ArgMatches) {
 }
 
 
-fn list_cmd(matches: &ArgMatches) {
+fn list_cmd(_matches: &ArgMatches) {
     let pass = read_pass(false).unwrap();
     println!("\nServices\n--------");
     for n in api::list(&pass) {
@@ -195,11 +193,16 @@ fn list_cmd(matches: &ArgMatches) {
 
 fn setkv_cmd(matches: &ArgMatches) {
     let name = matches.value_of("name").unwrap();
+    if !api::exists(name) {
+        println!("{} does not exist", name);
+        return;
+    }
+    let reset = matches.is_present("reset");
     let pass = read_pass(false).unwrap();
     match fetch_kvs(matches) {
         Err(s) => println!("{}", s),
         Ok(kvs) => {
-            match api::set_kvs(name, &pass, &kvs) {
+            match api::set_kvs(name, &pass, &kvs, reset) {
                 Err(s) => println!("{}", s),
                 _ => {}
             }
@@ -210,6 +213,10 @@ fn setkv_cmd(matches: &ArgMatches) {
 
 fn upgrade_cmd(matches: &ArgMatches) {
     let name = matches.value_of("name").unwrap();
+    if !api::exists(name) {
+        println!("{} does not exist", name);
+        return;
+    }
     let set_password = matches.value_of("set-password");
     let pass = read_pass(false).unwrap();
     match api::upgrade(name, &pass, set_password) {
@@ -218,6 +225,17 @@ fn upgrade_cmd(matches: &ArgMatches) {
             println!("Old pass: {}\nNew pass: {}", old_pass, new_pass);
         }
     };
+}
+
+
+fn delete_cmd(matches: &ArgMatches) {
+    let name = matches.value_of("name").unwrap();
+    if !api::exists(name) {
+        println!("{} does not exist", name);
+        return;
+    }
+    api::delete(name).unwrap();
+    println!("Service {} deleted.", name);
 }
 
 
@@ -239,7 +257,8 @@ pub fn cli() {
                          .help("New password's length")
                          .default_value("16"))
                     .arg(arg_kvs())
-                    .arg(arg_set_pass()))
+                    .arg(arg_set_pass())
+                    .display_order(10))
         .subcommand(SubCommand::with_name("get")
                     .about("Get password for service")
                     .arg(arg_name())
@@ -249,17 +268,30 @@ pub fn cli() {
                     .arg(Arg::with_name("all")
                          .short("a")
                          .long("all")
-                         .help("Print everything about the service")))
+                         .help("Print everything about the service"))
+                    .display_order(20))
         .subcommand(SubCommand::with_name("list")
-                    .about("List services unlocked by password"))
+                    .about("List services unlocked by password")
+                    .display_order(0))
         .subcommand(SubCommand::with_name("set-kv")
                     .about("Set key value pairs for a service")
                     .arg(arg_name())
-                    .arg(arg_kvs()))
+                    .arg(arg_kvs())
+                    .arg(Arg::with_name("reset")
+                         .short("r")
+                         .long("reset")
+                         .takes_value(false)
+                         .help("Clear all existing values"))
+                    .display_order(50))
         .subcommand(SubCommand::with_name("upgrade")
                     .about("Upgrade password")
                     .arg(arg_name())
-                    .arg(arg_set_pass()))
+                    .arg(arg_set_pass())
+                    .display_order(50))
+        .subcommand(SubCommand::with_name("delete")
+                    .about("Delete an existing service")
+                    .arg(arg_name())
+                    .display_order(50))
         .get_matches();
 
     match app.subcommand() {
@@ -268,8 +300,9 @@ pub fn cli() {
         ("list", Some(matches)) => list_cmd(matches),
         ("set-kv", Some(matches)) => setkv_cmd(matches),
         ("upgrade", Some(matches)) => upgrade_cmd(matches),
+        ("delete", Some(matches)) => delete_cmd(matches),
         _ => {
-            println!("Command not recognized");
+            println!("{}", app.usage());
         }
     };
 }

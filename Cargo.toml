@@ -14,3 +14,12 @@ bincode = "^1"
 clap = "2.33.0"
 termion = "1.5.5"
 dirs = "2.0.2"
+rand = "0.7.3"
+
+[[bin]]
+name = "ap"
+path = "src/main.rs"
+
+[[bin]]
+name = "aes"
+path = "src/test_aes.rs"

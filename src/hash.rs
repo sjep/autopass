@@ -1,7 +1,6 @@
 use crypto::digest::Digest;
 use crypto::sha3::Sha3;
 use crypto::sha2::Sha256;
-use crypto::sha1::Sha1;
 use crypto::md5::Md5;
 
 use serde::{Serialize, Deserialize};
@@ -63,7 +62,7 @@ pub fn bin_to_str(data: &[u8], text_mode: &TextMode, len: u8) -> String {
     for i in data[0..(len as usize)].iter() {
         res.push(map[((*i as f64 / 256.0) * count) as usize]);
     }
-    std::str::from_utf8(&res).unwrap().to_string()  
+    std::str::from_utf8(&res).unwrap().to_string()
 }
 
 pub fn get_digest(hash_alg: HashAlg) -> Box<dyn Digest> {
