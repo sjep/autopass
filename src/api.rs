@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::fs::{File, read_dir, remove_file};
 
-use crate::service::{ServiceEntry, full_path, PASS_PATH};
+use crate::service::{ServiceEntry, full_path, base_path};
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
 
 
@@ -115,7 +115,7 @@ pub fn set_kvs(name: &str,
 }
 
 pub fn list(pass: &str) -> Vec<String> {
-    let dir = Path::new(PASS_PATH);
+    let dir = base_path();
     if !dir.exists() {
         return vec![];
     }

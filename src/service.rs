@@ -31,10 +31,12 @@ fn filename(name: &str) -> String {
     bin_to_str(&fbin, &TextMode::AlphaNumeric, 32)
 }
 
+pub fn base_path() -> PathBuf {
+    Path::join(&dirs::home_dir().unwrap(), Path::new(PASS_PATH))
+}
 
 pub fn full_path(name: &str) -> PathBuf {
-    let base_dir = Path::join(&dirs::home_dir().unwrap(), Path::new(PASS_PATH));
-    Path::join(&base_dir, Path::new(&filename(name)))
+    Path::join(&base_path(), Path::new(&filename(name)))
 }
 
 
@@ -129,7 +131,7 @@ impl ServiceEntry {
     }
 
     pub fn save(&self, key: &[u8]) {
-        let path = Path::new(PASS_PATH);
+        let path = base_path();
         if !path.exists() {
             fs::create_dir_all(path).unwrap();
         }

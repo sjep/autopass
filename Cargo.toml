@@ -19,7 +19,3 @@ rand = "0.7.3"
 [[bin]]
 name = "ap"
 path = "src/main.rs"
-
-[[bin]]
-name = "aes"
-path = "src/test_aes.rs"
