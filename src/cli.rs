@@ -238,6 +238,10 @@ fn delete_cmd(matches: &ArgMatches) {
     println!("Service {} deleted.", name);
 }
 
+fn daemonize_cmd(matches: &ArgMatches) {
+    println!("Launching as service");
+}
+
 
 pub fn cli() {
     let app = App::new("Auto-pass")
@@ -292,6 +296,8 @@ pub fn cli() {
                     .about("Delete an existing service")
                     .arg(arg_name())
                     .display_order(50))
+        .subcommand(SubCommand::with_name("daemonize")
+                    .about("Run in server mode"))
         .get_matches();
 
     match app.subcommand() {
@@ -301,6 +307,7 @@ pub fn cli() {
         ("set-kv", Some(matches)) => setkv_cmd(matches),
         ("upgrade", Some(matches)) => upgrade_cmd(matches),
         ("delete", Some(matches)) => delete_cmd(matches),
+        ("daemonize", Some(matches)) => daemonize_cmd(matches),
         _ => {
             println!("{}", app.usage());
         }

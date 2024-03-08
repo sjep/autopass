@@ -1,5 +1,5 @@
 mod api;
-mod service;
+mod spec;
 mod hash;
 mod cli;
 

@@ -19,7 +19,8 @@ use rand::rngs::StdRng;
 use serde::{Serialize, Deserialize};
 
 
-pub const PASS_PATH: &str = ".pass";
+pub const PASS_PATH: &'static str = ".pass";
+pub const PASS_BASE_ENVVAR: &'static str = "AP_BASEDIR";
 
 
 fn filename(name: &str) -> String {
@@ -32,6 +33,9 @@ fn filename(name: &str) -> String {
 }
 
 pub fn base_path() -> PathBuf {
+    if let Ok(basepath) = std::env::var(PASS_BASE_ENVVAR) {
+        return basepath.into();
+    }
     Path::join(&dirs::home_dir().unwrap(), Path::new(PASS_PATH))
 }
 

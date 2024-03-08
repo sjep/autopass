@@ -1,8 +1,9 @@
-use std::path::Path;
 use std::fs::{File, read_dir, remove_file};
 
-use crate::service::{ServiceEntry, full_path, base_path};
+use crate::spec::service::{ServiceEntry, full_path, base_path};
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
+
+const AP_PORT: u16 = 6284;
 
 
 pub fn exists(name: &str) -> bool {
@@ -128,6 +129,7 @@ pub fn list(pass: &str) -> Vec<String> {
             names.push(entry.get_name().to_string());
         }
     }
+    names.sort();
     names
 }
 
@@ -160,4 +162,9 @@ pub fn delete(name: &str) -> Result<(), String> {
        Ok(_) => Ok(()),
        Err(e) => Err(e.to_string())
    }
+}
+
+pub fn daemonize() -> Result<(), std::io::Error> {
+    let socket = std::net::TcpListener::bind(("127.0.0.1", AP_PORT))?;
+    loop {}
 }
