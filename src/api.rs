@@ -1,15 +1,15 @@
 use std::fs::{File, read_dir, remove_file};
 
-use crate::spec::service::{ServiceEntry, full_path, base_path};
+use crate::spec::{self};
+use crate::spec::service::ServiceEntry;
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
 
 const AP_PORT: u16 = 6284;
 
 
 pub fn exists(name: &str) -> bool {
-    full_path(name).exists()
+    spec::full_path(name).exists()
 }
-
 
 fn create_key(pass: &str) -> Vec<u8> {
     let mut digest = get_digest(HashAlg::SHA256);
@@ -44,14 +44,14 @@ fn load_entry(name: &str, pass: &str) -> Result<ServiceEntry, &'static str> {
         return Err("Service doesn't exist");
     }
 
-    let filename = full_path(name);
+    let filename = spec::full_path(name);
     let mut file = match File::open(filename) {
         Err(_) => return Err("Error opening file"),
         Ok(f) => f
     };
     let key = create_key(pass);
 
-    ServiceEntry::load(&mut file, &key)
+    spec::load::<ServiceEntry>(&mut file, &key)
 }
 
 pub fn new(name: &str,
@@ -79,7 +79,7 @@ pub fn new(name: &str,
         text_mode
     );
     let h2 = create_key(pass);
-    entry.save(&h2);
+    spec::save(&h2, &entry);
     Ok(entry)
 }
 
@@ -108,7 +108,7 @@ pub fn set_kvs(name: &str,
     match load_entry(&name, &pass) {
         Ok(mut entry) => {
             entry.set_kvs(kvs, reset);
-            entry.save(&create_key(pass));
+            spec::save(&create_key(pass), &entry);
             Ok(())
         },
         Err(s) => Err(s)
@@ -116,7 +116,7 @@ pub fn set_kvs(name: &str,
 }
 
 pub fn list(pass: &str) -> Vec<String> {
-    let dir = base_path();
+    let dir = spec::base_path();
     if !dir.exists() {
         return vec![];
     }
@@ -125,7 +125,7 @@ pub fn list(pass: &str) -> Vec<String> {
         let filename = fbuf.unwrap().path();
         let mut file = File::open(filename).unwrap();
         let key = create_key(pass);
-        if let Ok(entry) = ServiceEntry::load(&mut file, &key) {
+        if let Ok(entry) = spec::load::<ServiceEntry>(&mut file, &key) {
             names.push(entry.get_name().to_string());
         }
     }
@@ -148,7 +148,7 @@ pub fn upgrade(name: &str,
             };
             let old_pass = entry.get_pass(false).unwrap().to_string();
             entry.set_pass(&new_pass);
-            entry.save(&create_key(pass));
+            spec::save(&create_key(pass), &entry);
             Ok((old_pass, new_pass))
         },
         Err(s) => {
@@ -158,7 +158,7 @@ pub fn upgrade(name: &str,
 }
 
 pub fn delete(name: &str) -> Result<(), String> {
-   match remove_file(full_path(name)) {
+   match remove_file(spec::full_path(name)) {
        Ok(_) => Ok(()),
        Err(e) => Err(e.to_string())
    }
