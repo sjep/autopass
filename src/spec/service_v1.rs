@@ -3,6 +3,7 @@ use std::fmt;
 
 use clipboard::ClipboardProvider;
 use clipboard::osx_clipboard::OSXClipboardContext;
+use time::{format_description::{self}, OffsetDateTime};
 
 use crate::hash::TextMode;
 
@@ -10,19 +11,31 @@ use serde::{Serialize, Deserialize};
 
 use super::Serializable;
 
+fn now() -> u64 {
+    OffsetDateTime::now_utc().unix_timestamp() as u64
+}
+
+fn timestamp_as_string(ts: u64) -> String {
+    OffsetDateTime::from_unix_timestamp(ts as i64)
+        .unwrap()
+        .format(&format_description::well_known::Rfc2822)
+        .unwrap()
+}
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct ServiceEntry {
+pub struct ServiceEntryV1 {
     pad: u16,
     name: String,
     pass: String,
     nonce: u8,
     kv: HashMap<String, String>,
     len: u8,
-    text_mode: TextMode
+    text_mode: TextMode,
+    create_time: u64,
+    modify_time: u64
 }
 
-impl ServiceEntry {
+impl ServiceEntryV1 {
 
     pub fn new(name: &str,
                pass: &str,
@@ -34,14 +47,17 @@ impl ServiceEntry {
         for (key, val) in kvs {
             kv.insert(key.to_string(), val.to_string());
         }
-        ServiceEntry{
+        let now = now();
+        Self {
             pad: 0,
             name: name.to_string(),
             pass: pass.to_string(),
             nonce,
             kv,
             len,
-            text_mode: text_mode.clone()
+            text_mode: text_mode.clone(),
+            create_time: now,
+            modify_time: now
         }
     }
 
@@ -60,6 +76,7 @@ impl ServiceEntry {
         for (key, value) in kvs.iter() {
             self.kv.insert(key.to_string(), value.to_string());
         }
+        self.modify_time = now();
     }
 
     pub fn get_pass(&self, clipboard: bool) -> Option<&str> {
@@ -90,14 +107,16 @@ impl ServiceEntry {
 
     pub fn set_pass(&mut self, pass: &str) {
         self.pass = pass.to_string();
+        self.modify_time = now();
     }
 
     pub fn to_string(&self) -> String {
         format!("{}: {:?}", self.name, self.kv)
     }
+
 }
 
-impl Serializable for ServiceEntry {
+impl Serializable for ServiceEntryV1 {
     fn to_binary(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
@@ -116,16 +135,26 @@ impl Serializable for ServiceEntry {
     fn sanity_check(&self) -> bool {
         self.pad == 0
     }
+
+    fn version() -> u16 {
+        1
+    }
+
+    fn spec_type() -> super::SpecType {
+        super::SpecType::Service
+    }
 }
 
-impl fmt::Display for ServiceEntry {
+impl fmt::Display for ServiceEntryV1 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut kvs = String::new();
         for (key, value) in self.kv.iter() {
-            kvs = format!("{}{}: {}\n", kvs, key, value);
+            kvs = format!("{}  {}: {}\n", kvs, key, value);
         }
-        f.write_str(
-            &format!("Name: {}\nPass: {}\nKey value pairs:\n{}", self.name, self.pass, kvs))
+        let created = format!("Created: {}", timestamp_as_string(self.create_time));
+        let modified = format!("Modified: {}", timestamp_as_string(self.modify_time));
+
+        f.write_str(&format!("Name: {}\nPass: {}\n{}\n{}\nKey value pairs:\n{}", self.name, self.pass, created, modified, kvs))
     }
 }
 

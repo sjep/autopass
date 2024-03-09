@@ -6,13 +6,13 @@ use serde::{Serialize, Deserialize};
 
 use crate::hash::{bin_to_str, get_digest, HashAlg, TextMode};
 
-pub mod service;
+pub mod service_v1;
 
 pub const PASS_PATH: &'static str = ".pass";
 pub const PASS_BASE_ENVVAR: &'static str = "AP_BASEDIR";
 
 
-fn filename(name: &str) -> String {
+pub fn filename(name: &str) -> String {
     let mut digest = get_digest(HashAlg::SHA256);
     let mut fbin = vec![0; digest.output_bytes()];
     digest.input(name.as_bytes());
@@ -40,15 +40,26 @@ pub trait Serializable: Sized {
     fn from_binary(bin: &[u8]) -> Option<Self>;
 
     fn sanity_check(&self) -> bool;
+
+    fn version() -> u16;
+
+    fn spec_type() -> SpecType;
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct ServiceEncrypted {
+pub enum SpecType {
+    Service
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct PassData {
+    spec_type: SpecType,
+    version: u16,
     iv: [u8; 16],
     cyphertext: Vec<u8>
 }
 
-impl ServiceEncrypted {
+impl PassData {
 
     fn encrypt<T: Serializable>(key: &[u8], service: &T) -> Self {
         let mut bin = service.to_binary();
@@ -77,7 +88,7 @@ impl ServiceEncrypted {
                 assert!(false, "Encrypt Error: {:?}", e);
             }
         }
-        Self{iv, cyphertext}
+        Self{spec_type: T::spec_type(), version: T::version(), iv, cyphertext}
     }
 
     fn decrypt<T: Serializable>(&self, key: &[u8]) -> Option<T> {
@@ -107,7 +118,7 @@ pub fn save<T: Serializable>(key: &[u8], service: &T) {
         std::fs::create_dir_all(path).unwrap();
     }
 
-    let encrypted = ServiceEncrypted::encrypt(key, service);
+    let encrypted = PassData::encrypt(key, service);
     let data = bincode::serialize(&encrypted).unwrap();
     let full_path = full_path(service.name());
     let mut file = File::create(full_path).unwrap();
@@ -117,8 +128,8 @@ pub fn save<T: Serializable>(key: &[u8], service: &T) {
 pub fn load<T: Serializable>(file: &mut File, key: &[u8]) -> Result<T, &'static str> {
     let mut buffer = vec![];
     file.read_to_end(&mut buffer).unwrap();
-    let service_encrypted: ServiceEncrypted = bincode::deserialize(&buffer).unwrap();
-    match service_encrypted.decrypt::<T>(key) {
+    let encoded: PassData = bincode::deserialize(&buffer).unwrap();
+    match encoded.decrypt::<T>(key) {
         Some(entry) => {
             match entry.sanity_check() {
                 true => Ok(entry),

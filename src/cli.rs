@@ -11,7 +11,7 @@ use crate::hash::TextMode;
 
 const PASS_ENV_VAR: &'static str = "AP_PWD";
 
-fn read_pass_raw(prompt: &str) -> String {
+pub fn read_pass_raw(prompt: &str) -> String {
     let stdout = stdout();
     let mut stdout = stdout.lock();
     let stdin = stdin();
@@ -26,7 +26,7 @@ fn read_pass_raw(prompt: &str) -> String {
 }
 
 
-fn read_pass(twice: bool) -> Option<String> {
+pub fn read_pass(twice: bool) -> Option<String> {
     if !twice {
         if let Ok(s) = env::var(PASS_ENV_VAR) {
             return Some(s);
@@ -182,9 +182,11 @@ fn get_cmd(matches: &ArgMatches) {
 }
 
 
-fn list_cmd(_matches: &ArgMatches) {
+fn list_cmd(matches: &ArgMatches) {
     let pass = read_pass(false).unwrap();
-    println!("\nServices\n--------");
+    if !matches.is_present("simple") {
+        println!("\nServices\n--------");
+    }
     for n in api::list(&pass) {
         println!("{}", n);
     }
@@ -276,7 +278,10 @@ pub fn cli() {
                     .display_order(20))
         .subcommand(SubCommand::with_name("list")
                     .about("List services unlocked by password")
-                    .display_order(0))
+                    .display_order(0)
+                    .arg(Arg::with_name("simple")
+                        .short("s")
+                        .help("Simple output")))
         .subcommand(SubCommand::with_name("set-kv")
                     .about("Set key value pairs for a service")
                     .arg(arg_name())

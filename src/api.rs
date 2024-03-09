@@ -1,7 +1,7 @@
 use std::fs::{File, read_dir, remove_file};
 
 use crate::spec::{self};
-use crate::spec::service::ServiceEntry;
+use crate::spec::service_v1::ServiceEntryV1;
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
 
 const AP_PORT: u16 = 6284;
@@ -11,7 +11,7 @@ pub fn exists(name: &str) -> bool {
     spec::full_path(name).exists()
 }
 
-fn create_key(pass: &str) -> Vec<u8> {
+pub fn create_key(pass: &str) -> Vec<u8> {
     let mut digest = get_digest(HashAlg::SHA256);
     let mut key = vec![0; digest.output_bytes()];
     digest.input(pass.as_bytes());
@@ -39,7 +39,7 @@ fn generate_pass(name: &str,
     bin_to_str(&pwbin, text_mode, len)
 }
 
-fn load_entry(name: &str, pass: &str) -> Result<ServiceEntry, &'static str> {
+fn load_entry(name: &str, pass: &str) -> Result<ServiceEntryV1, &'static str> {
     if !exists(name) {
         return Err("Service doesn't exist");
     }
@@ -51,7 +51,7 @@ fn load_entry(name: &str, pass: &str) -> Result<ServiceEntry, &'static str> {
     };
     let key = create_key(pass);
 
-    spec::load::<ServiceEntry>(&mut file, &key)
+    spec::load::<ServiceEntryV1>(&mut file, &key)
 }
 
 pub fn new(name: &str,
@@ -59,7 +59,7 @@ pub fn new(name: &str,
            text_mode: &TextMode,
            len: u8,
            kvs: &[(&str, &str)],
-           service_pass: Option<&str>) -> Result<ServiceEntry, String> {
+           service_pass: Option<&str>) -> Result<ServiceEntryV1, String> {
 
     if exists(name) {
         return Err(format!("Service '{}' already exists", name))
@@ -70,7 +70,7 @@ pub fn new(name: &str,
         Some(s) => s.to_string()
     };
 
-    let entry = ServiceEntry::new(
+    let entry = ServiceEntryV1::new(
         name,
         &password,
         0u8,
@@ -97,7 +97,7 @@ pub fn get(name: &str,
 }
 
 pub fn get_all(name: &str,
-               pass: &str) -> Result<ServiceEntry, &'static str> {
+               pass: &str) -> Result<ServiceEntryV1, &'static str> {
     load_entry(name, pass)
 }
 
@@ -125,7 +125,7 @@ pub fn list(pass: &str) -> Vec<String> {
         let filename = fbuf.unwrap().path();
         let mut file = File::open(filename).unwrap();
         let key = create_key(pass);
-        if let Ok(entry) = spec::load::<ServiceEntry>(&mut file, &key) {
+        if let Ok(entry) = spec::load::<ServiceEntryV1>(&mut file, &key) {
             names.push(entry.get_name().to_string());
         }
     }
