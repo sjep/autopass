@@ -1,4 +1,5 @@
 use std::fs::{File, read_dir, remove_file};
+use std::sync::mpsc::channel;
 
 use crate::spec::{self};
 use crate::spec::service_v1::ServiceEntryV1;
@@ -162,9 +163,4 @@ pub fn delete(name: &str) -> Result<(), String> {
        Ok(_) => Ok(()),
        Err(e) => Err(e.to_string())
    }
-}
-
-pub fn daemonize() -> Result<(), std::io::Error> {
-    let socket = std::net::TcpListener::bind(("127.0.0.1", AP_PORT))?;
-    loop {}
 }

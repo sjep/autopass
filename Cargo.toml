@@ -16,7 +16,17 @@ termion = "1.5.5"
 dirs = "2.0.2"
 rand = "0.7.3"
 time = { version = "0.3.34", features = ["formatting"] }
+egui = { version = "0.26", optional = true }
+eframe = { version = "0.26", optional = true }
+
+[features]
+gui = ["egui", "eframe"]
+
+[[bin]]
+name = "apcli"
+path = "src/main.rs"
 
 [[bin]]
 name = "ap"
-path = "src/main.rs"
+path = "src/ap.rs"
+required-features = ["gui"]
