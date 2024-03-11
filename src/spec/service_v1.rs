@@ -114,6 +114,14 @@ impl ServiceEntryV1 {
         format!("{}: {:?}", self.name, self.kv)
     }
 
+    pub fn created(&self) -> String {
+        timestamp_as_string(self.create_time)
+    }
+
+    pub fn modified(&self) -> String {
+        timestamp_as_string(self.modify_time)
+    }
+
 }
 
 impl Serializable for ServiceEntryV1 {
@@ -151,8 +159,8 @@ impl fmt::Display for ServiceEntryV1 {
         for (key, value) in self.kv.iter() {
             kvs = format!("{}  {}: {}\n", kvs, key, value);
         }
-        let created = format!("Created: {}", timestamp_as_string(self.create_time));
-        let modified = format!("Modified: {}", timestamp_as_string(self.modify_time));
+        let created = format!("Created: {}", self.created());
+        let modified = format!("Modified: {}", self.modified());
 
         f.write_str(&format!("Name: {}\nPass: {}\n{}\n{}\nKey value pairs:\n{}", self.name, self.pass, created, modified, kvs))
     }
