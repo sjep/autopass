@@ -36,10 +36,23 @@ impl CurrentService {
     }
 }
 
+struct NewService {
+    name: String,
+    password: Option<String>,
+
+}
+
+impl NewService {
+    fn new() -> Self {
+        Self { name: String::new(), password: None }
+    }
+}
+
 struct ApApp {
     pwd: String,
     current: Option<CurrentService>,
-    services: Vec<String>
+    services: Vec<String>,
+    newservice: Option<NewService>
 }
 
 impl ApApp {
@@ -49,13 +62,62 @@ impl ApApp {
         Self {
             pwd,
             current: None,
-            services
+            services,
+            newservice: None
         }
     }
 }
 
 impl eframe::App for ApApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut clear_newservice = false;
+        if let Some(ns) = &mut self.newservice {
+            egui::Window::new("New Service")
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label("Add Service");
+                    let servicename = egui::TextEdit::singleline(&mut ns.name)
+                        .hint_text("Service Name");
+                    ui.add(servicename);
+
+                    ui.horizontal(|ui| {
+                        match &mut ns.password {
+                            Some(pwd) => {
+                                let newpassword = egui::TextEdit::singleline(pwd)
+                                    .password(true)
+                                    .interactive(true)
+                                    .hint_text("Service Password");
+                                ui.add(newpassword);
+                                if ui.button("Auto").clicked() {
+                                    ns.password = None;
+                                }
+                            }
+                            None => {
+                                let mut stub = String::new();
+                                let newpassword = egui::TextEdit::singleline(&mut stub)
+                                    .password(true)
+                                    .interactive(false)
+                                    .hint_text("Auto Generated");
+                                ui.add(newpassword);
+                                if ui.button("Manual").clicked() {
+                                    ns.password = Some(String::new());
+                                }
+                            }
+                        }
+
+                    });
+                    if ui.button("Save").clicked() {
+                        clear_newservice = true;
+                    }
+                }
+            );
+        }
+        if clear_newservice {
+            self.newservice = None;
+            ctx.request_repaint();
+        }
+
         egui::SidePanel::left("services")
             .resizable(false)
             .show(ctx, |ui| {
@@ -103,6 +165,12 @@ impl eframe::App for ApApp {
                     ui.add(Label::new("Select service to view"));
                 }
             }
+
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                if ui.button("Add Service").clicked() {
+                    self.newservice = Some(NewService::new());
+                }
+           });
         });
 
     }

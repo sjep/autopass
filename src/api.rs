@@ -20,7 +20,7 @@ pub fn create_key(pass: &str) -> Vec<u8> {
     key
 }
 
-fn generate_pass(name: &str,
+pub fn generate_pass(name: &str,
                  pass: &str,
                  nonce: u8,
                  len: u8,
