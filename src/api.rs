@@ -1,11 +1,8 @@
 use std::fs::{File, read_dir, remove_file};
-use std::sync::mpsc::channel;
 
 use crate::spec::{self};
 use crate::spec::service_v1::ServiceEntryV1;
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
-
-const AP_PORT: u16 = 6284;
 
 
 pub fn exists(name: &str) -> bool {
@@ -114,6 +111,17 @@ pub fn set_kvs(name: &str,
         },
         Err(s) => Err(s)
     }
+}
+
+pub fn empty() -> bool {
+    let dir = spec::base_path();
+    if !dir.exists() {
+        return true;
+    }
+    read_dir(dir)
+        .unwrap()
+        .nth(0)
+        .is_none()
 }
 
 pub fn list(pass: &str) -> Vec<String> {
