@@ -1,8 +1,10 @@
 use std::{cell::RefCell, ops::DerefMut, rc::Rc};
 
 use egui::{Button, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
-use pass::{api, spec::service_v1::ServiceEntryV1};
+use gui::{confirmbox::{Action, ConfirmBox}, msgbox::launch_msgbox, Display, Windowed};
+use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
 
+mod gui;
 
 fn main() {
     let pwd = if api::empty() {
@@ -35,11 +37,24 @@ fn launch_ap(pwd: String) {
     eframe::run_native("AutoPass", native_options, Box::new(|_cc| Box::new(ApApp::new(pwd)))).unwrap();
 }
 
+struct DeleteService {
+    service: String
+}
+
+impl Action for DeleteService {
+    fn doit(&mut self) {
+        if let Err(e) = api::delete(&self.service) {
+            eprintln!("Error deleting service {}: {}", self.service, e);
+        }
+    }
+}
 
 struct CurrentService {
     entry: ServiceEntryV1,
     show_pass: bool,
     copied: bool,
+    refresh_services: bool,
+    confirm: Windowed<ConfirmBox<DeleteService>>,
 }
 
 impl CurrentService {
@@ -47,11 +62,19 @@ impl CurrentService {
         Self {
             entry,
             show_pass: false,
-            copied: false
+            copied: false,
+            refresh_services: false,
+            confirm: Windowed::new()
         }
     }
+}
 
-    fn display(&mut self, ui: &mut Ui) -> bool {
+impl Display<bool> for CurrentService {
+    fn display(&mut self, ctx: &egui::Context, ui: &mut Ui) -> bool {
+        if !self.confirm.display(ctx, ui) {
+            self.refresh_services = true;
+        }
+        
         let mut keep = true;
         ui.add(Label::new(format!("Name: {}", self.entry.get_name())));
         ui.horizontal(|ui| {
@@ -90,9 +113,21 @@ impl CurrentService {
             }
             ui.add(Separator::default());
         }
-        if ui.add(Button::new("Hide Service")).clicked() {
-            keep = false
-        }
+        ui.horizontal(|ui| {
+            if ui.add(Button::new("Hide Service")).clicked() {
+                keep = false
+            }
+            if ui.add(Button::new("Delete")).clicked() {
+                self.confirm.set(
+                    "Delete Service".to_owned(), 
+                    ConfirmBox::new(
+                        format!("Are you sure you want to delete service {}", self.entry.name()),
+                        DeleteService { service: self.entry.name().to_owned() }
+                    )
+                );
+            }
+        });
+
         keep
     }
 }
@@ -212,7 +247,11 @@ impl eframe::App for ApApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             match &mut self.current {
                 Some(se) => {
-                    if !se.display(ui) {
+                    if se.refresh_services {
+                        self.services = api::list(&self.pwd);
+                        se.refresh_services = false;
+                        self.current = None;
+                    } else if !se.display(ctx, ui) {
                         self.current = None;
                     }
                 }
@@ -264,35 +303,6 @@ impl eframe::App for PasswordPrompt {
                     m.request_focus(response.id);
                 });
             }
-        });
-    }
-}
-
-fn launch_msgbox(msg: String, app_name: String) {
-    let viewport = ViewportBuilder::default()
-        .with_inner_size((200.0, 50.0));
-    let mut native_options = eframe::NativeOptions::default();
-    native_options.viewport = viewport;
-    let msgbox = MsgBox { msg };
-    eframe::run_native(&app_name, native_options, Box::new(|_cc| Box::new(msgbox)))
-        .unwrap();
-}
-
-struct MsgBox {
-    msg: String
-}
-
-impl eframe::App for MsgBox {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label(&self.msg);
-            ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
-                let response = ui.button("Ok");
-                response.request_focus();
-                if response.clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
         });
     }
 }
