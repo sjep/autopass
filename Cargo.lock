@@ -2185,6 +2185,7 @@ dependencies = [
  "dirs",
  "eframe",
  "egui",
+ "lazy_static",
  "rand 0.7.3",
  "rust-crypto",
  "serde",

@@ -2,9 +2,11 @@ use egui::Ui;
 
 pub mod msgbox;
 pub mod confirmbox;
+pub mod pwdprompt;
+pub mod validator;
 
-pub trait Display<T> {
-    fn display(&mut self, ctx: &egui::Context, ui: &mut Ui) -> T;
+pub trait Display<C, T> {
+    fn display(&mut self, ctx: &egui::Context, ui: &mut Ui, apctx: &mut C) -> T;
 }
 
 pub struct Windowed<T> {
@@ -26,8 +28,8 @@ impl<T> Windowed<T> {
     }
 }
 
-impl<T: Display<bool>> Display<bool> for Windowed<T> {
-    fn display(&mut self, ctx: &egui::Context, _ui: &mut Ui) -> bool {
+impl<C, T: Display<C, bool>> Display<C, bool> for Windowed<T> {
+    fn display(&mut self, ctx: &egui::Context, _ui: &mut Ui, apctx: &mut C) -> bool {
         let mut clear = false;
         if let Some(d) = &mut self.inner {
             egui::Window::new(&self.title)
@@ -36,7 +38,7 @@ impl<T: Display<bool>> Display<bool> for Windowed<T> {
                 .collapsible(false)
                 .show(ctx, |ui| 
                 {
-                    clear = !d.display(ctx, ui);
+                    clear = !d.display(ctx, ui, apctx);
                 });
         }
         if clear {

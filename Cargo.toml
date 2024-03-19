@@ -18,6 +18,7 @@ rand = "0.7.3"
 time = { version = "0.3.34", features = ["formatting"] }
 egui = { version = "0.26", optional = true }
 eframe = { version = "0.26", optional = true }
+lazy_static = "1.4.0"
 
 [features]
 gui = ["egui", "eframe"]

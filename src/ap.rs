@@ -1,10 +1,10 @@
-use std::{cell::RefCell, ops::DerefMut, rc::Rc};
+use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, TextEdit, Ui, ViewportBuilder};
 
-use egui::{Button, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
-use gui::{confirmbox::{Action, ConfirmBox}, msgbox::launch_msgbox, Display, Windowed};
+use gui::{confirmbox::{Action, ConfirmBox}, msgbox::launch_msgbox, pwdprompt::prompt_password, validator::{textedit, NotEmpty, Validator}, Display, Windowed};
 use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
 
 mod gui;
+
 
 fn main() {
     let pwd = if api::empty() {
@@ -33,18 +33,33 @@ fn launch_ap(pwd: String) {
     let mut native_options = eframe::NativeOptions::default();
     native_options.viewport = viewport;
 
-
     eframe::run_native("AutoPass", native_options, Box::new(|_cc| Box::new(ApApp::new(pwd)))).unwrap();
+}
+
+struct ApCtx {
+    masterpwd: String,
+    refresh_service_list: bool
+}
+
+impl ApCtx {
+    fn new(masterpwd: String) -> Self {
+        Self {
+            masterpwd,
+            refresh_service_list: false
+        }
+    }
 }
 
 struct DeleteService {
     service: String
 }
 
-impl Action for DeleteService {
-    fn doit(&mut self) {
+impl Action<ApCtx> for DeleteService {
+    fn doit(&mut self, apctx: &mut ApCtx) {
         if let Err(e) = api::delete(&self.service) {
             eprintln!("Error deleting service {}: {}", self.service, e);
+        } else {
+            apctx.refresh_service_list = true;
         }
     }
 }
@@ -53,7 +68,8 @@ struct CurrentService {
     entry: ServiceEntryV1,
     show_pass: bool,
     copied: bool,
-    refresh_services: bool,
+    newkey: String,
+    newval: String,
     confirm: Windowed<ConfirmBox<DeleteService>>,
 }
 
@@ -63,17 +79,29 @@ impl CurrentService {
             entry,
             show_pass: false,
             copied: false,
-            refresh_services: false,
+            newkey: String::new(),
+            newval: String::new(),
             confirm: Windowed::new()
         }
     }
+
+    fn savekvs(&mut self, apctx: &mut ApCtx) {
+        if self.newkey.len() == 0 || self.newval.len() == 0 {
+            return;
+        }
+        api::set_kvs(self.entry.name(), &apctx.masterpwd, &[(&self.newkey, &self.newval)], false)
+            .expect("Error saving key value");
+        self.newkey = String::new();
+        self.newval = String::new();
+
+        self.entry = api::get_all(self.entry.name(), &apctx.masterpwd)
+            .expect("Unable to reset entry after setting kvs");
+    }
 }
 
-impl Display<bool> for CurrentService {
-    fn display(&mut self, ctx: &egui::Context, ui: &mut Ui) -> bool {
-        if !self.confirm.display(ctx, ui) {
-            self.refresh_services = true;
-        }
+impl Display<ApCtx, bool> for CurrentService {
+    fn display(&mut self, ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
+        self.confirm.display(ctx, ui, apctx);
         
         let mut keep = true;
         ui.add(Label::new(format!("Name: {}", self.entry.get_name())));
@@ -100,19 +128,41 @@ impl Display<bool> for CurrentService {
         ui.add(Label::new(format!("Created: {}", self.entry.created())));
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
+        /* Kvs section */
         let kvs = self.entry.get_kvs();
-        if kvs.len() > 0 {
-            ui.add(Separator::default());
-            
-            for (key, value) in kvs {
-                ui.horizontal(|ui| {
-                    ui.add(Label::new(key));
-                    ui.add(Separator::default());
-                    ui.add(Label::new(value));
+        ui.add(Separator::default());
+        for (key, value) in kvs {
+            ui.horizontal(|ui| {
+                ui.add(Label::new(key));
+                ui.add(Label::new("="));
+                ui.add(Label::new(value)
+                    .truncate(true));
+                ui.scope(|ui| {
+                    ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
+                    if ui.add(Button::new("X")).clicked() {
+                        println!("Delete kv pair");
+                    }
                 });
-            }
-            ui.add(Separator::default());
+            });
         }
+
+        ui.horizontal(|ui| {
+            textedit(ui, &mut self.newkey, &NotEmpty, |te, _valid| {
+                te.desired_width(50.0)
+            });
+            ui.add(Label::new("="));
+            textedit(ui, &mut self.newval, &NotEmpty, |te, _valid| {
+                te.desired_width(50.0)
+            });
+            let save = Button::new("Save");
+            let enabled = NotEmpty.valid(&self.newkey).is_ok() && NotEmpty.valid(&self.newval).is_ok();
+            if ui.add_enabled(enabled, save).clicked() {
+                self.savekvs(apctx);
+            }
+        });
+        ui.add(Separator::default());
+        
+        /* Service level buttons */
         ui.horizontal(|ui| {
             if ui.add(Button::new("Hide Service")).clicked() {
                 keep = false
@@ -197,10 +247,10 @@ impl NewService {
 }
 
 struct ApApp {
-    pwd: String,
     current: Option<CurrentService>,
     services: Vec<String>,
-    newservice: Option<NewService>
+    newservice: Option<NewService>,
+    ctx: ApCtx
 }
 
 impl ApApp {
@@ -208,10 +258,10 @@ impl ApApp {
         let services: Vec<String> = api::list(&pwd);
 
         Self {
-            pwd,
             current: None,
             services,
-            newservice: None
+            newservice: None,
+            ctx: ApCtx::new(pwd)
         }
     }
 }
@@ -235,7 +285,7 @@ impl eframe::App for ApApp {
                         let resp = ui.add(SelectableLabel::new(selected, service));
                         if resp.clicked() {
                             self.current = if self.current.is_none() || self.current.as_ref().unwrap().entry.get_name() != service {
-                                api::get_all(service, &self.pwd).ok().map(|se| CurrentService::new(se))
+                                api::get_all(service, &self.ctx.masterpwd).ok().map(|se| CurrentService::new(se))
                             } else {
                                 None
                             };
@@ -247,11 +297,11 @@ impl eframe::App for ApApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             match &mut self.current {
                 Some(se) => {
-                    if se.refresh_services {
-                        self.services = api::list(&self.pwd);
-                        se.refresh_services = false;
+                    if self.ctx.refresh_service_list {
+                        self.services = api::list(&self.ctx.masterpwd);
+                        self.ctx.refresh_service_list = false;
                         self.current = None;
-                    } else if !se.display(ctx, ui) {
+                    } else if !se.display(ctx, ui, &mut self.ctx) {
                         self.current = None;
                     }
                 }
@@ -267,42 +317,5 @@ impl eframe::App for ApApp {
             });
         });
 
-    }
-}
-
-fn prompt_password(msg: &'static str) -> String {
-    let viewport = ViewportBuilder::default()
-        .with_inner_size((200.0, 50.0));
-    let mut native_options = eframe::NativeOptions::default();
-    native_options.viewport = viewport;
-    let pwd = Rc::new(RefCell::new((String::new(), msg)));
-    let cpwd = pwd.clone();
-    eframe::run_native("PasswordPrompt", native_options, Box::new(|_cc| Box::new(PasswordPrompt{password: cpwd})))
-        .unwrap();
-    pwd.take().0
-}
-
-struct PasswordPrompt {
-    password: Rc<RefCell<(String, &'static str)>>,
-}
-
-impl eframe::App for PasswordPrompt {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let mut pwdref = (*self.password).borrow_mut();
-            let pwd = pwdref.deref_mut();
-            let textedit = egui::TextEdit::singleline(&mut pwd.0)
-                .password(true)
-                .lock_focus(true)
-                .hint_text(pwd.1);
-            let response = ui.add(textedit);
-            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else {
-                ui.memory_mut(|m| {
-                    m.request_focus(response.id);
-                });
-            }
-        });
     }
 }

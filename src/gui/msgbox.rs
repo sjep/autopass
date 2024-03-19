@@ -12,8 +12,8 @@ impl MsgBox {
     }
 }
 
-impl Display<bool> for MsgBox {
-    fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui) -> bool {
+impl Display<(), bool> for MsgBox {
+    fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, _apctx: &mut ()) -> bool {
         let mut close  = false;
         ui.label(&self.msg);
         ui.vertical_centered(|ui| {
@@ -29,7 +29,7 @@ impl Display<bool> for MsgBox {
 impl eframe::App for MsgBox {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            if !self.display(ctx, ui) {
+            if !self.display(ctx, ui, &mut ()) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
