@@ -1,7 +1,6 @@
 use egui::{Color32, Response, TextEdit, Ui};
 
 const ERR_COLOR: Color32 = Color32::LIGHT_RED;
-const OK_COLOR: Color32 = Color32::WHITE;
 
 pub trait Validator<T> {
     fn valid(&self, obj: &T) -> Result<(), String>;
@@ -28,7 +27,7 @@ pub fn textedit(ui: &mut Ui, text: &mut String, validator: &dyn Validator<String
                 ui.add(textedit)
             }
             Err(msg) => {
-                ui.visuals_mut().extreme_bg_color = Color32::LIGHT_RED;
+                ui.visuals_mut().extreme_bg_color = ERR_COLOR;
                 let textedit = TextEdit::singleline(text);
                 let textedit = modify_textedit(textedit, false);
                 ui.add(textedit).on_hover_text(msg)

@@ -1,4 +1,4 @@
-use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, TextEdit, Ui, ViewportBuilder};
+use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
 
 use gui::{confirmbox::{Action, ConfirmBox}, msgbox::launch_msgbox, pwdprompt::prompt_password, validator::{textedit, NotEmpty, Validator}, Display, Windowed};
 use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
@@ -38,13 +38,15 @@ fn launch_ap(pwd: String) {
 
 struct ApCtx {
     masterpwd: String,
-    refresh_service_list: bool
+    refresh_service: bool,
+    refresh_service_list: bool,
 }
 
 impl ApCtx {
     fn new(masterpwd: String) -> Self {
         Self {
             masterpwd,
+            refresh_service: false,
             refresh_service_list: false
         }
     }
@@ -64,25 +66,49 @@ impl Action<ApCtx> for DeleteService {
     }
 }
 
+struct KvDelete {
+    service: String,
+    key: String
+}
+
+impl Action<ApCtx> for KvDelete {
+    fn doit(&mut self, apctx: &mut ApCtx) {
+        if let Ok(entry) = api::get_all(&self.service, &apctx.masterpwd) {
+            let mut kvs = vec![];
+            for (key, value) in entry.get_kvs() {
+                if key != &self.key {
+                    kvs.push((key.as_str(), value.as_str()));
+                }
+            }
+            if let Err(e) = api::set_kvs(&self.service, &apctx.masterpwd, &kvs, true) {
+                eprintln!("Failed to save kvs for service {}: {}", self.service, e);
+            }
+            apctx.refresh_service = true;
+        }
+    }
+}
+
 struct CurrentService {
     entry: ServiceEntryV1,
     show_pass: bool,
     copied: bool,
     newkey: String,
     newval: String,
-    confirm: Windowed<ConfirmBox<DeleteService>>,
+    confirm: Windowed<ConfirmBox<Box<dyn Action<ApCtx>>>>,
 }
 
 impl CurrentService {
-    fn new(entry: ServiceEntryV1) -> Self {
-        Self {
-            entry,
-            show_pass: false,
-            copied: false,
-            newkey: String::new(),
-            newval: String::new(),
-            confirm: Windowed::new()
-        }
+    fn new(service: &str, apctx: &ApCtx) -> Option<Self> {
+        api::get_all(service, &apctx.masterpwd).ok().map(|entry| {
+            Self {
+                entry,
+                show_pass: false,
+                copied: false,
+                newkey: String::new(),
+                newval: String::new(),
+                confirm: Windowed::new()
+            }
+        })
     }
 
     fn savekvs(&mut self, apctx: &mut ApCtx) {
@@ -129,7 +155,10 @@ impl Display<ApCtx, bool> for CurrentService {
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
         /* Kvs section */
-        let kvs = self.entry.get_kvs();
+        let mut delkey = None;
+        let mut kvs = self.entry.get_kvs().iter().collect::<Vec<(&String, &String)>>();
+        kvs.sort();
+
         ui.add(Separator::default());
         for (key, value) in kvs {
             ui.horizontal(|ui| {
@@ -140,10 +169,19 @@ impl Display<ApCtx, bool> for CurrentService {
                 ui.scope(|ui| {
                     ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
                     if ui.add(Button::new("X")).clicked() {
-                        println!("Delete kv pair");
+                        delkey = Some(key.to_owned());
                     }
                 });
             });
+        }
+        if let Some(key) = delkey {
+            self.confirm.set(
+                "Delete key/value pair".to_owned(),
+                ConfirmBox::new(
+                    format!("Are you sure you want to delete {}?", key),
+                    Box::new(KvDelete { service: self.entry.name().to_owned(), key })
+                )
+            );
         }
 
         ui.horizontal(|ui| {
@@ -172,7 +210,7 @@ impl Display<ApCtx, bool> for CurrentService {
                     "Delete Service".to_owned(), 
                     ConfirmBox::new(
                         format!("Are you sure you want to delete service {}", self.entry.name()),
-                        DeleteService { service: self.entry.name().to_owned() }
+                        Box::new(DeleteService { service: self.entry.name().to_owned() })
                     )
                 );
             }
@@ -268,6 +306,21 @@ impl ApApp {
 
 impl eframe::App for ApApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+
+        if self.ctx.refresh_service_list {
+            self.services = api::list(&self.ctx.masterpwd);
+            self.ctx.refresh_service_list = false;
+            self.current = None;
+        }
+
+        if self.ctx.refresh_service {
+            let service = self.current.as_ref().map(|se| se.entry.name());
+            if let Some(service) = service {
+                self.current = CurrentService::new(service, &self.ctx);
+            }
+            self.ctx.refresh_service = false;
+        }
+
         if let Some(ns) = &mut self.newservice {
             if !ns.window(ctx, frame) {
                 self.newservice = None;
@@ -285,7 +338,7 @@ impl eframe::App for ApApp {
                         let resp = ui.add(SelectableLabel::new(selected, service));
                         if resp.clicked() {
                             self.current = if self.current.is_none() || self.current.as_ref().unwrap().entry.get_name() != service {
-                                api::get_all(service, &self.ctx.masterpwd).ok().map(|se| CurrentService::new(se))
+                                CurrentService::new(service, &self.ctx)
                             } else {
                                 None
                             };
@@ -297,11 +350,7 @@ impl eframe::App for ApApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             match &mut self.current {
                 Some(se) => {
-                    if self.ctx.refresh_service_list {
-                        self.services = api::list(&self.ctx.masterpwd);
-                        self.ctx.refresh_service_list = false;
-                        self.current = None;
-                    } else if !se.display(ctx, ui, &mut self.ctx) {
+                    if !se.display(ctx, ui, &mut self.ctx) {
                         self.current = None;
                     }
                 }

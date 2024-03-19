@@ -7,6 +7,14 @@ pub trait Action<C> {
     fn doit(&mut self, apctx: &mut C);
 }
 
+
+impl<C> Action<C> for Box<dyn Action<C>> {
+    fn doit(&mut self, apctx: &mut C) {
+        self.as_mut().doit(apctx);
+    }
+}
+
+
 pub struct ConfirmBox<A> {
     msg: String,
     action: A
