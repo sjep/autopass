@@ -1,6 +1,6 @@
 use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
 
-use gui::{confirmbox::{Action, ConfirmBox}, msgbox::launch_msgbox, pwdprompt::prompt_password, validator::{textedit, NotEmpty, Validator}, Display, Windowed};
+use gui::{confirmbox::{Action, ConfirmBox}, msgbox::launch_msgbox, pwdprompt::prompt_password, validator::{textedit, NotEmpty, NotInList, Validator}, Display, Windowed};
 use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
 
 mod gui;
@@ -38,14 +38,16 @@ fn launch_ap(pwd: String) {
 
 struct ApCtx {
     masterpwd: String,
+    services: Vec<String>,
     refresh_service: bool,
     refresh_service_list: bool,
 }
 
 impl ApCtx {
-    fn new(masterpwd: String) -> Self {
+    fn new(masterpwd: String, services: Vec<String>) -> Self {
         Self {
             masterpwd,
+            services,
             refresh_service: false,
             refresh_service_list: false
         }
@@ -127,7 +129,7 @@ impl CurrentService {
 
 impl Display<ApCtx, bool> for CurrentService {
     fn display(&mut self, ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
-        self.confirm.display(ctx, ui, apctx);
+        self.confirm.display(ctx, apctx);
         
         let mut keep = true;
         ui.add(Label::new(format!("Name: {}", self.entry.get_name())));
@@ -229,65 +231,61 @@ impl NewService {
     fn new() -> Self {
         Self { name: String::new(), password: None }
     }
+}
 
-    fn window(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) -> bool {
+impl Display<ApCtx, bool> for NewService {
+    fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
         let mut keep = true;
-        egui::Window::new("New Service")
-            .resizable(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                let servicename = egui::TextEdit::singleline(&mut self.name)
-                    .hint_text("Service Name");
-                ui.add(servicename);
+        textedit(ui, &mut self.name, &NotInList::new(&apctx.services), |te, _valid| {
+            te
+                .hint_text("Service Name")
+        });
 
-                ui.horizontal(|ui| {
-                    match &mut self.password {
-                        Some(pwd) => {
-                            let newpassword = egui::TextEdit::singleline(pwd)
-                                .password(true)
-                                .interactive(true)
-                                .hint_text("Service Password");
-                            ui.add(newpassword);
-                            if ui.button("Auto").clicked() {
-                                self.password = None;
-                            }
-                        }
-                        None => {
-                            let mut stub = String::new();
-                            let newpassword = egui::TextEdit::singleline(&mut stub)
-                                .password(true)
-                                .interactive(false)
-                                .hint_text("Auto Generated");
-                            ui.add(newpassword);
-                            if ui.button("Manual").clicked() {
-                                self.password = Some(String::new());
-                            }
-                        }
+        ui.horizontal(|ui| {
+            match &mut self.password {
+                Some(pwd) => {
+                    let newpassword = egui::TextEdit::singleline(pwd)
+                        .password(true)
+                        .interactive(true)
+                        .hint_text("Service Password");
+                    ui.add(newpassword);
+                    if ui.button("Auto").clicked() {
+                        self.password = None;
                     }
-
-                });
-                ui.horizontal(|ui| {
-                    ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
-                        if ui.button("Save").clicked() {
-                            keep = false;
-                        }
-                    });
-                    ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
-                        if ui.button("Cancel").clicked() {
-                            keep = false;
-                        }
-                    });
-                });
+                }
+                None => {
+                    let mut stub = String::new();
+                    let newpassword = egui::TextEdit::singleline(&mut stub)
+                        .password(true)
+                        .interactive(false)
+                        .hint_text("Auto Generated");
+                    ui.add(newpassword);
+                    if ui.button("Manual").clicked() {
+                        self.password = Some(String::new());
+                    }
+                }
             }
-        );
+
+        });
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
+                if ui.button("Save").clicked() {
+                    keep = false;
+                }
+            });
+            ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
+                if ui.button("Cancel").clicked() {
+                    keep = false;
+                }
+            });
+        });
         keep
     }
 }
 
 struct ApApp {
     current: Option<CurrentService>,
-    services: Vec<String>,
-    newservice: Option<NewService>,
+    newservice: Windowed<NewService>,
     ctx: ApCtx
 }
 
@@ -297,18 +295,17 @@ impl ApApp {
 
         Self {
             current: None,
-            services,
-            newservice: None,
-            ctx: ApCtx::new(pwd)
+            newservice: Windowed::new(),
+            ctx: ApCtx::new(pwd, services)
         }
     }
 }
 
 impl eframe::App for ApApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 
         if self.ctx.refresh_service_list {
-            self.services = api::list(&self.ctx.masterpwd);
+            self.ctx.services = api::list(&self.ctx.masterpwd);
             self.ctx.refresh_service_list = false;
             self.current = None;
         }
@@ -321,17 +318,13 @@ impl eframe::App for ApApp {
             self.ctx.refresh_service = false;
         }
 
-        if let Some(ns) = &mut self.newservice {
-            if !ns.window(ctx, frame) {
-                self.newservice = None;
-            }
-        }
+        self.newservice.display(ctx, &mut self.ctx);
 
         egui::SidePanel::left("services")
             .resizable(false)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for service in self.services.iter() {
+                    for service in self.ctx.services.iter() {
                         let selected = self.current.as_ref().map(|se| {
                             se.entry.get_name() == service
                         }).unwrap_or(false);
@@ -361,7 +354,7 @@ impl eframe::App for ApApp {
 
             ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
                 if ui.button("Add Service").clicked() {
-                    self.newservice = Some(NewService::new());
+                    self.newservice.set("New Service".to_owned(), NewService::new());
                 }
             });
         });

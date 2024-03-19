@@ -26,10 +26,9 @@ impl<T> Windowed<T> {
         self.title = title;
         self.inner.replace(val);
     }
-}
 
-impl<C, T: Display<C, bool>> Display<C, bool> for Windowed<T> {
-    fn display(&mut self, ctx: &egui::Context, _ui: &mut Ui, apctx: &mut C) -> bool {
+    pub fn display<C>(&mut self, ctx: &egui::Context, apctx: &mut C) -> bool
+    where T: Display<C, bool> {
         let mut clear = false;
         if let Some(d) = &mut self.inner {
             egui::Window::new(&self.title)
