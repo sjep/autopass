@@ -33,7 +33,6 @@ impl<T> Windowed<T> {
         if let Some(d) = &mut self.inner {
             egui::Window::new(&self.title)
                 .resizable(false)
-                .auto_sized()
                 .collapsible(false)
                 .show(ctx, |ui| 
                 {

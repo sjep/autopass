@@ -1,6 +1,13 @@
 use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
 
-use gui::{confirmbox::{Action, ConfirmBox}, msgbox::launch_msgbox, pwdprompt::prompt_password, validator::{textedit, NotEmpty, NotInList, Validator}, Display, Windowed};
+use gui::{
+    confirmbox::{Action, ConfirmBox},
+    msgbox::launch_msgbox,
+    pwdprompt::prompt_password,
+    validator::{textedit, LengthBounds, NotEmpty, NotInList, ValidString},
+    Display,
+    Windowed
+};
 use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
 
 mod gui;
@@ -94,8 +101,8 @@ struct CurrentService {
     entry: ServiceEntryV1,
     show_pass: bool,
     copied: bool,
-    newkey: String,
-    newval: String,
+    newkey: ValidString,
+    newval: ValidString,
     confirm: Windowed<ConfirmBox<Box<dyn Action<ApCtx>>>>,
 }
 
@@ -106,21 +113,21 @@ impl CurrentService {
                 entry,
                 show_pass: false,
                 copied: false,
-                newkey: String::new(),
-                newval: String::new(),
+                newkey: ValidString::new(Box::new(NotEmpty)),
+                newval: ValidString::new(Box::new(NotEmpty)),
                 confirm: Windowed::new()
             }
         })
     }
 
     fn savekvs(&mut self, apctx: &mut ApCtx) {
-        if self.newkey.len() == 0 || self.newval.len() == 0 {
+        if !self.newkey.is_valid() || !self.newval.is_valid() {
             return;
         }
-        api::set_kvs(self.entry.name(), &apctx.masterpwd, &[(&self.newkey, &self.newval)], false)
+        api::set_kvs(self.entry.name(), &apctx.masterpwd, &[(&self.newkey.string(), &self.newval.string())], false)
             .expect("Error saving key value");
-        self.newkey = String::new();
-        self.newval = String::new();
+        self.newkey = ValidString::new(Box::new(NotEmpty));
+        self.newval = ValidString::new(Box::new(NotEmpty));
 
         self.entry = api::get_all(self.entry.name(), &apctx.masterpwd)
             .expect("Unable to reset entry after setting kvs");
@@ -187,15 +194,15 @@ impl Display<ApCtx, bool> for CurrentService {
         }
 
         ui.horizontal(|ui| {
-            textedit(ui, &mut self.newkey, &NotEmpty, |te, _valid| {
+            textedit(ui, &mut self.newkey, None, |te, _valid| {
                 te.desired_width(50.0)
             });
             ui.add(Label::new("="));
-            textedit(ui, &mut self.newval, &NotEmpty, |te, _valid| {
+            textedit(ui, &mut self.newval, None, |te, _valid| {
                 te.desired_width(50.0)
             });
             let save = Button::new("Save");
-            let enabled = NotEmpty.valid(&self.newkey).is_ok() && NotEmpty.valid(&self.newval).is_ok();
+            let enabled = self.newkey.is_valid() && self.newval.is_valid();
             if ui.add_enabled(enabled, save).clicked() {
                 self.savekvs(apctx);
             }
@@ -207,7 +214,7 @@ impl Display<ApCtx, bool> for CurrentService {
             if ui.add(Button::new("Hide Service")).clicked() {
                 keep = false
             }
-            if ui.add(Button::new("Delete")).clicked() {
+            if ui.add(Button::new("Delete Service")).clicked() {
                 self.confirm.set(
                     "Delete Service".to_owned(), 
                     ConfirmBox::new(
@@ -223,20 +230,36 @@ impl Display<ApCtx, bool> for CurrentService {
 }
 
 struct NewService {
-    name: String,
-    password: Option<String>,
+    name: ValidString,
+    password: Option<ValidString>,
+    kvs: Vec<(String, String)>,
+    newkvp: Option<(ValidString, ValidString)>
 }
 
 impl NewService {
     fn new() -> Self {
-        Self { name: String::new(), password: None }
+        Self { name: ValidString::new(Box::new(NotEmpty)), password: None, kvs: vec![], newkvp: None }
+    }
+
+    fn save(&self, apctx: &mut ApCtx) {
+        if let Err(e) = api::new(
+            self.name.string(),
+            &apctx.masterpwd,
+            &pass::hash::TextMode::NoWhiteSpace,
+            16,
+            &self.kvs,
+            self.password.as_ref().map(|vs| vs.string())
+        ) {
+            eprintln!("Error saving new service {}: {}", self.name.string(), e);
+        }
+        apctx.refresh_service_list = true;
     }
 }
 
 impl Display<ApCtx, bool> for NewService {
     fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
         let mut keep = true;
-        textedit(ui, &mut self.name, &NotInList::new(&apctx.services), |te, _valid| {
+        textedit(ui, &mut self.name, Some(&NotInList::new(&apctx.services)), |te, _valid| {
             te
                 .hint_text("Service Name")
         });
@@ -244,11 +267,13 @@ impl Display<ApCtx, bool> for NewService {
         ui.horizontal(|ui| {
             match &mut self.password {
                 Some(pwd) => {
-                    let newpassword = egui::TextEdit::singleline(pwd)
-                        .password(true)
-                        .interactive(true)
-                        .hint_text("Service Password");
-                    ui.add(newpassword);
+                    textedit(ui, pwd, None, |te, _valid| {
+                        te
+                            .password(true)
+                            .interactive(true)
+                            .hint_text("Service Password")
+                    });
+
                     if ui.button("Auto").clicked() {
                         self.password = None;
                     }
@@ -258,18 +283,85 @@ impl Display<ApCtx, bool> for NewService {
                     let newpassword = egui::TextEdit::singleline(&mut stub)
                         .password(true)
                         .interactive(false)
-                        .hint_text("Auto Generated");
+                        .hint_text("Password Auto Generated");
                     ui.add(newpassword);
                     if ui.button("Manual").clicked() {
-                        self.password = Some(String::new());
+                        self.password = Some(ValidString::new(Box::new(LengthBounds::new(8, 16))));
                     }
                 }
             }
-
         });
+
+        ui.add(Separator::default());
+
+        let mut delidx = None;
+        for (idx, (key, value)) in self.kvs.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.add(Label::new(key));
+                ui.add(Label::new("="));
+                ui.add(Label::new(value)
+                    .truncate(true));
+                ui.scope(|ui| {
+                    ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
+                    if ui.add(Button::new("X")).clicked() {
+                        delidx = Some(idx);
+                    }
+                });
+            });
+        }
+
+        if let Some(idx) = delidx {
+            self.kvs.remove(idx);
+        }
+
+        let mut rmnew = false;
+        let mut savekv = false;
+        match &mut self.newkvp {
+            Some((key, val)) => {
+                ui.horizontal(|ui| {
+                    textedit(ui, key, None, |te, _valid| te.desired_width(50.0));
+                    ui.add(Label::new("="));
+                    textedit(ui, val, None, |te, _valid| te.desired_width(50.0));
+
+                    let commit = Button::new("Commit");
+                    let enabled = key.is_valid() && val.is_valid();
+                    if ui.add_enabled(enabled, commit).clicked() {
+                        savekv = true;
+                    }
+                    ui.scope(|ui| {
+                        ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
+                        if ui.add(Button::new("X")).clicked() {
+                            rmnew = true;
+                        }
+                    });
+                });
+            }
+            None => {
+                if ui.add(Button::new("Add key/value")).clicked() {
+                    self.newkvp = Some((ValidString::new(Box::new(NotEmpty)), ValidString::new(Box::new(NotEmpty))));
+                }
+            }
+        }
+
+        if rmnew {
+            self.newkvp = None;
+        }
+        if savekv {
+            if let Some((k, v)) = self.newkvp.take() {
+                self.kvs.push((k.string().to_owned(), v.string().to_owned()));
+            }
+        }
+
+        ui.add(Separator::default());
+
         ui.horizontal(|ui| {
             ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
-                if ui.button("Save").clicked() {
+                let save = Button::new("Save");
+                let enabled = self.name.is_valid()
+                    && self.password.as_ref().map_or(true, |vs| vs.is_valid())
+                    && self.newkvp.is_none();
+                if ui.add_enabled(enabled, save).clicked() {
+                    self.save(apctx);
                     keep = false;
                 }
             });

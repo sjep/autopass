@@ -37,15 +37,17 @@ pub struct ServiceEntryV1 {
 
 impl ServiceEntryV1 {
 
-    pub fn new(name: &str,
-               pass: &str,
-               nonce: u8,
-               kvs: &[(&str, &str)],
-               len: u8,
-               text_mode: &TextMode) -> Self {
+    pub fn new<T: AsRef<str>>(
+        name: &str,
+        pass: &str,
+        nonce: u8,
+        kvs: &[(T, T)],
+        len: u8,
+        text_mode: &TextMode) -> Self
+    {
         let mut kv: HashMap<String, String> = HashMap::new();
         for (key, val) in kvs {
-            kv.insert(key.to_string(), val.to_string());
+            kv.insert(key.as_ref().to_owned(), val.as_ref().to_owned());
         }
         let now = now();
         Self {

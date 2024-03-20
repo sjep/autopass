@@ -52,12 +52,14 @@ fn load_entry(name: &str, pass: &str) -> Result<ServiceEntryV1, &'static str> {
     spec::load::<ServiceEntryV1>(&mut file, &key)
 }
 
-pub fn new(name: &str,
-           pass: &str,
-           text_mode: &TextMode,
-           len: u8,
-           kvs: &[(&str, &str)],
-           service_pass: Option<&str>) -> Result<ServiceEntryV1, String> {
+pub fn new<T: AsRef<str>>(
+    name: &str,
+    pass: &str,
+    text_mode: &TextMode,
+    len: u8,
+    kvs: &[(T, T)],
+    service_pass: Option<&str>) -> Result<ServiceEntryV1, String>
+{
 
     if exists(name) {
         return Err(format!("Service '{}' already exists", name))
