@@ -1,17 +1,10 @@
-use egui::Ui;
+use egui::{Button, Ui};
 
 use super::Display;
 
 
 pub trait Action<C> {
     fn doit(&mut self, apctx: &mut C);
-}
-
-
-impl<C> Action<C> for Box<dyn Action<C>> {
-    fn doit(&mut self, apctx: &mut C) {
-        self.as_mut().doit(apctx);
-    }
 }
 
 
@@ -31,12 +24,15 @@ impl<C, A: Action<C>> Display<C, bool> for ConfirmBox<A> {
         let mut close  = false;
         ui.label(&self.msg);
         ui.horizontal(|ui| {
-            let ok = ui.button("Yes");
-            let cancel = ui.button("No");
-            if ok.clicked() {
+            let ok = Button::new("Yes");
+            if ui.add(ok).clicked() {
                 self.action.doit(apctx);
+                close = true;
             }
-            close = ok.clicked() || cancel.clicked();
+            let cancel = Button::new("No");
+            if ui.add(cancel).clicked() {
+                close = true;
+            }
         });
 
         !close

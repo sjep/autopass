@@ -65,7 +65,7 @@ struct DeleteService {
     service: String
 }
 
-impl Action<ApCtx> for DeleteService {
+impl Action<ApCtx> for Box<DeleteService> {
     fn doit(&mut self, apctx: &mut ApCtx) {
         if let Err(e) = api::delete(&self.service) {
             eprintln!("Error deleting service {}: {}", self.service, e);
@@ -80,7 +80,7 @@ struct KvDelete {
     key: String
 }
 
-impl Action<ApCtx> for KvDelete {
+impl Action<ApCtx> for Box<KvDelete> {
     fn doit(&mut self, apctx: &mut ApCtx) {
         if let Ok(entry) = api::get_all(&self.service, &apctx.masterpwd) {
             let mut kvs = vec![];
@@ -97,13 +97,89 @@ impl Action<ApCtx> for KvDelete {
     }
 }
 
+fn newpwdprompt(ui: &mut Ui, password: &mut Option<ValidString>) {
+    ui.horizontal(|ui| {
+        match password {
+            Some(pwd) => {
+                textedit(ui, pwd, None, |te, _valid| {
+                    te
+                        .password(true)
+                        .interactive(true)
+                        .hint_text("Service Password")
+                });
+
+                if ui.button("Auto").clicked() {
+                    password.take();
+                }
+            }
+            None => {
+                let mut stub = String::new();
+                let newpassword = egui::TextEdit::singleline(&mut stub)
+                    .password(true)
+                    .interactive(false)
+                    .hint_text("Password Auto Generated");
+                ui.add(newpassword);
+                if ui.button("Manual").clicked() {
+                    password.replace(ValidString::new(Box::new(LengthBounds::new(8, 16))));
+                }
+            }
+        }
+    });
+}
+
+struct PasswordRefresh {
+    service: String,
+    password: Option<ValidString>,
+}
+
+impl PasswordRefresh {
+    fn new(service: String) -> Self {
+        Self {
+            service,
+            password: None
+        }
+    }
+
+    fn refresh_password(&self, apctx: &mut ApCtx) {
+        let pwd = self.password.as_ref().map(|pwd| pwd.string());
+        if let Err(e) = api::upgrade(&self.service, &apctx.masterpwd, pwd) {
+            eprintln!("Error updating password for service {}: {}", self.service, e);
+        }
+        apctx.refresh_service = true;
+    }
+}
+
+impl Display<ApCtx, bool> for PasswordRefresh {
+    fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
+        let mut keep = true;
+        newpwdprompt(ui, &mut self.password);
+
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
+                let save = Button::new("Save");
+                let enabled = self.password.as_ref().map_or(true, |vs| vs.is_valid());
+                if ui.add_enabled(enabled, save).clicked() {
+                    self.refresh_password(apctx);
+                    keep = false;
+                }
+            });
+            ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
+                if ui.button("Cancel").clicked() {
+                    keep = false;
+                }
+            });
+        });
+        keep
+    }
+}
+
 struct CurrentService {
     entry: ServiceEntryV1,
     show_pass: bool,
     copied: bool,
     newkey: ValidString,
     newval: ValidString,
-    confirm: Windowed<ConfirmBox<Box<dyn Action<ApCtx>>>>,
+    confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
 impl CurrentService {
@@ -159,6 +235,15 @@ impl Display<ApCtx, bool> for CurrentService {
                 self.entry.get_pass(true);
                 self.copied = true;
             }
+            ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
+                let incrpwd = Button::new("Reset Password");
+                if ui.add(incrpwd).clicked() {
+                    self.confirm.set(
+                        format!("New password for {}", self.entry.name()),
+                        Box::new(PasswordRefresh::new(self.entry.name().to_owned()))
+                    );
+                }
+            })
         });
         ui.add(Label::new(format!("Created: {}", self.entry.created())));
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
@@ -186,11 +271,11 @@ impl Display<ApCtx, bool> for CurrentService {
         if let Some(key) = delkey {
             self.confirm.set(
                 "Delete key/value pair".to_owned(),
-                ConfirmBox::new(
+                Box::new(ConfirmBox::new(
                     format!("Are you sure you want to delete {}?", key),
                     Box::new(KvDelete { service: self.entry.name().to_owned(), key })
                 )
-            );
+            ));
         }
 
         ui.horizontal(|ui| {
@@ -217,10 +302,10 @@ impl Display<ApCtx, bool> for CurrentService {
             if ui.add(Button::new("Delete Service")).clicked() {
                 self.confirm.set(
                     "Delete Service".to_owned(), 
-                    ConfirmBox::new(
+                    Box::new(ConfirmBox::new(
                         format!("Are you sure you want to delete service {}", self.entry.name()),
                         Box::new(DeleteService { service: self.entry.name().to_owned() })
-                    )
+                    ))
                 );
             }
         });
@@ -265,31 +350,7 @@ impl Display<ApCtx, bool> for NewService {
         });
 
         ui.horizontal(|ui| {
-            match &mut self.password {
-                Some(pwd) => {
-                    textedit(ui, pwd, None, |te, _valid| {
-                        te
-                            .password(true)
-                            .interactive(true)
-                            .hint_text("Service Password")
-                    });
-
-                    if ui.button("Auto").clicked() {
-                        self.password = None;
-                    }
-                }
-                None => {
-                    let mut stub = String::new();
-                    let newpassword = egui::TextEdit::singleline(&mut stub)
-                        .password(true)
-                        .interactive(false)
-                        .hint_text("Password Auto Generated");
-                    ui.add(newpassword);
-                    if ui.button("Manual").clicked() {
-                        self.password = Some(ValidString::new(Box::new(LengthBounds::new(8, 16))));
-                    }
-                }
-            }
+            newpwdprompt(ui, &mut self.password);
         });
 
         ui.add(Separator::default());
