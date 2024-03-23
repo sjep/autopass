@@ -1,5 +1,5 @@
-
+mod cli;
 
 fn main() {
-    pass::cli::cli();
+    cli::cli();
 }

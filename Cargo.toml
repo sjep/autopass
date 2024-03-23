@@ -4,28 +4,27 @@ version = "0.1.0"
 authors = ["adschwab"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 rust-crypto = "^0.2.36"
 clipboard = "^0.5"
 serde = { version = "^1", features = ["derive"] }
 bincode = "^1"
-clap = "2.33.0"
-termion = "1.5.5"
+clap = { version = "2.33.0", optional = true }
+termion = { version = "1.5.5", optional = true }
 dirs = "2.0.2"
 rand = "0.7.3"
 time = { version = "0.3.34", features = ["formatting", "local-offset"] }
 egui = { version = "0.26", optional = true }
 eframe = { version = "0.26", optional = true }
-lazy_static = "1.4.0"
 
 [features]
 gui = ["egui", "eframe"]
+cli = ["clap", "termion"]
 
 [[bin]]
 name = "apcli"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "ap"

@@ -23,7 +23,7 @@ fn timestamp_as_string(ts: u64) -> String {
             dtutc.to_offset(offset);
             false
         }
-        Err(e) => {
+        Err(_e) => {
             true
         }
     };
