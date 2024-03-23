@@ -475,7 +475,17 @@ impl eframe::App for ApApp {
 
         egui::SidePanel::left("services")
             .resizable(false)
+            .max_width(100.0)
             .show(ctx, |ui| {
+                egui::TopBottomPanel::bottom("Bottom Left").min_height(25.0).show_separator_line(false).show_inside(ui, |ui| {
+                    ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
+                        let addservice = Button::new("Add Service");
+                        if ui.add(addservice).clicked() {
+                            self.newservice.set("New Service".to_owned(), NewService::new());
+                        }
+                    });
+                });
+
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for service in self.ctx.services.iter() {
                         let selected = self.current.as_ref().map(|se| {
@@ -489,8 +499,8 @@ impl eframe::App for ApApp {
                                 None
                             };
                         }
-                }
-            });
+                    }
+                });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -504,12 +514,6 @@ impl eframe::App for ApApp {
                     ui.add(Label::new("Select service to view"));
                 }
             }
-
-            ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
-                if ui.button("Add Service").clicked() {
-                    self.newservice.set("New Service".to_owned(), NewService::new());
-                }
-            });
         });
 
     }

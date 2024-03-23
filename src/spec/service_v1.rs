@@ -3,7 +3,7 @@ use std::fmt;
 
 use clipboard::ClipboardProvider;
 use clipboard::osx_clipboard::OSXClipboardContext;
-use time::{format_description::{self}, OffsetDateTime};
+use time::{format_description, OffsetDateTime, UtcOffset};
 
 use crate::hash::TextMode;
 
@@ -16,10 +16,23 @@ fn now() -> u64 {
 }
 
 fn timestamp_as_string(ts: u64) -> String {
-    OffsetDateTime::from_unix_timestamp(ts as i64)
-        .unwrap()
-        .format(&format_description::well_known::Rfc2822)
-        .unwrap()
+    let dtutc = OffsetDateTime::from_unix_timestamp(ts as i64)
+        .unwrap();
+    let utc = match UtcOffset::current_local_offset() {
+        Ok(offset) => {
+            dtutc.to_offset(offset);
+            false
+        }
+        Err(e) => {
+            true
+        }
+    };
+    let mut dtstr = dtutc.format(&format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap())
+        .unwrap();
+    if utc {
+        dtstr = format!("{} UTC", dtstr);
+    }
+    dtstr
 }
 
 #[derive(Deserialize, Serialize, Debug)]
