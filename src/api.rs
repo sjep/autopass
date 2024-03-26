@@ -1,5 +1,7 @@
 use std::fs::{File, read_dir, remove_file};
 
+use crate::spec::encryptor::Encrypt;
+use crate::spec::{base_path, full_path};
 use crate::spec::{self};
 use crate::spec::service_v1::ServiceEntryV1;
 use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
@@ -18,10 +20,10 @@ pub fn create_key(pass: &str) -> Vec<u8> {
 }
 
 pub fn generate_pass(name: &str,
-                 pass: &str,
-                 nonce: u8,
-                 len: u8,
-                 text_mode: &TextMode) -> String {
+                     pass: &str,
+                     nonce: u8,
+                     len: u8,
+                     text_mode: &TextMode) -> String {
     let mut digest = get_digest(HashAlg::SHA256);
     let mut h1 = vec![0; digest.output_bytes()];
     digest.input(name.as_bytes());
@@ -49,7 +51,7 @@ fn load_entry(name: &str, pass: &str) -> Result<ServiceEntryV1, &'static str> {
     };
     let key = create_key(pass);
 
-    spec::load::<ServiceEntryV1>(&mut file, &key)
+    spec::load::<ServiceEntryV1, Encrypt>(&mut file, &key)
 }
 
 pub fn new<T: AsRef<str>>(
@@ -79,7 +81,11 @@ pub fn new<T: AsRef<str>>(
         text_mode
     );
     let h2 = create_key(pass);
-    spec::save(&h2, &entry);
+    let path = base_path();
+    std::fs::create_dir_all(path).unwrap();
+    let full_path = full_path(entry.get_name());
+    let mut file = File::create(full_path).unwrap();
+    spec::save::<ServiceEntryV1, Encrypt>(&mut file, &h2, &entry);
     Ok(entry)
 }
 
@@ -108,7 +114,9 @@ pub fn set_kvs(name: &str,
     match load_entry(&name, &pass) {
         Ok(mut entry) => {
             entry.set_kvs(kvs, reset);
-            spec::save(&create_key(pass), &entry);
+            let full_path = full_path(entry.get_name());
+            let mut file = File::create(full_path).unwrap();
+            spec::save::<ServiceEntryV1, Encrypt>(&mut file, &create_key(pass), &entry);
             Ok(())
         },
         Err(s) => Err(s)
@@ -133,10 +141,13 @@ pub fn list(pass: &str) -> Vec<String> {
     }
     let mut names: Vec<String> = vec![];
     for fbuf in read_dir(dir).unwrap() {
-        let filename = fbuf.unwrap().path();
-        let mut file = File::open(filename).unwrap();
+        let filename = fbuf.unwrap();
+        if filename.file_type().unwrap().is_dir() {
+            continue;
+        }
+        let mut file = File::open(filename.path()).unwrap();
         let key = create_key(pass);
-        if let Ok(entry) = spec::load::<ServiceEntryV1>(&mut file, &key) {
+        if let Ok(entry) = spec::load::<ServiceEntryV1, Encrypt>(&mut file, &key) {
             names.push(entry.get_name().to_string());
         }
     }
@@ -159,7 +170,9 @@ pub fn upgrade(name: &str,
             };
             let old_pass = entry.get_pass(false).unwrap().to_string();
             entry.set_pass(&new_pass);
-            spec::save(&create_key(pass), &entry);
+            let full_path = full_path(entry.get_name());
+            let mut file = File::create(full_path).unwrap();
+            spec::save::<ServiceEntryV1, Encrypt>(&mut file, &create_key(pass), &entry);
             Ok((old_pass, new_pass))
         },
         Err(s) => {

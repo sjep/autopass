@@ -5,8 +5,8 @@ use std::str::FromStr;
 use clap::{Arg, App, SubCommand, ArgMatches};
 use termion::input::TermRead;
 
-use pass::api;
-use pass::hash::TextMode;
+use crate::api;
+use crate::hash::TextMode;
 
 
 const PASS_ENV_VAR: &'static str = "AP_PWD";

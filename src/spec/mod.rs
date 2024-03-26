@@ -1,12 +1,12 @@
 use std::{fs::File, io::{Read, Write}, path::{Path, PathBuf}};
 
-use crypto::{aes::{cbc_decryptor, cbc_encryptor, KeySize}, blockmodes::NoPadding, buffer::{BufferResult, RefReadBuffer, RefWriteBuffer}};
-use rand::{rngs::StdRng, RngCore, SeedableRng};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::hash::{bin_to_str, get_digest, HashAlg, TextMode};
 
 pub mod service_v1;
+pub mod encryptor;
+pub mod encryptor_legacy;
 
 pub const PASS_PATH: &'static str = ".pass";
 pub const PASS_BASE_ENVVAR: &'static str = "AP_BASEDIR";
@@ -32,6 +32,11 @@ pub fn full_path(name: &str) -> PathBuf {
     Path::join(&base_path(), Path::new(&filename(name)))
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub enum SpecType {
+    Service
+}
+
 pub trait Serializable: Sized {
     fn name(&self) -> &str;
 
@@ -46,89 +51,24 @@ pub trait Serializable: Sized {
     fn spec_type() -> SpecType;
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub enum SpecType {
-    Service
+pub trait Encryptor: Serialize + for <'a> Deserialize<'a> {
+    fn encrypt<T: Serializable>(key: &[u8], obj: &T) -> Self;
+
+    fn decrypt<T: Serializable>(&self, key: &[u8]) -> Option<T>;
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct PassData {
-    spec_type: SpecType,
-    version: u16,
-    iv: [u8; 16],
-    cyphertext: Vec<u8>
-}
-
-impl PassData {
-
-    fn encrypt<T: Serializable>(key: &[u8], service: &T) -> Self {
-        let mut bin = service.to_binary();
-
-        let mut gen: StdRng = StdRng::from_seed([5u8; 32]);
-        let mut iv: [u8; 16] = [0; 16];
-        gen.fill_bytes(&mut iv);
-
-        let blocksize = 16;
-
-        let leftover = blocksize - bin.len() % blocksize;
-        for _ in 0..leftover {
-            bin.push(0);
-        }
-
-        let mut cyphertext = vec![0; bin.len()];
-
-        let mut encryptor = cbc_encryptor(KeySize::KeySize256, &key, &iv, NoPadding);
-        match encryptor.encrypt(&mut RefReadBuffer::new(&bin),
-                                &mut RefWriteBuffer::new(&mut cyphertext),
-                                true) {
-            Ok(buf_res) => if let BufferResult::BufferOverflow = buf_res {
-                assert!(false, "Buffer incorrect size. Encrypt aborted");
-            },
-            Err(e) => {
-                assert!(false, "Encrypt Error: {:?}", e);
-            }
-        }
-        Self{spec_type: T::spec_type(), version: T::version(), iv, cyphertext}
-    }
-
-    fn decrypt<T: Serializable>(&self, key: &[u8]) -> Option<T> {
-        let iv = &self.iv;
-        let cyphertext = &self.cyphertext;
-        let mut decryptor = cbc_decryptor(KeySize::KeySize256, &key, iv, NoPadding);
-        let mut plaintext = vec![0; cyphertext.len()];
-        match decryptor.decrypt(&mut RefReadBuffer::new(cyphertext),
-                                &mut RefWriteBuffer::new(&mut plaintext),
-                                true) {
-            Ok(buf_res) => if let BufferResult::BufferOverflow = buf_res {
-                assert!(false, "Buffer incorrect size. Decrypt aborted");
-            },
-            Err(e) => {
-                assert!(false, "Decrypt Error: {:?}", e);
-            }
-        }
-
-        T::from_binary(&plaintext)
-    }
-
-}
-
-pub fn save<T: Serializable>(key: &[u8], service: &T) {
-    let path = base_path();
-    if !path.exists() {
-        std::fs::create_dir_all(path).unwrap();
-    }
-
-    let encrypted = PassData::encrypt(key, service);
+pub fn save<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8], service: &T) {
+    let encrypted = E::encrypt(key, service);
     let data = bincode::serialize(&encrypted).unwrap();
     let full_path = full_path(service.name());
     let mut file = File::create(full_path).unwrap();
     file.write_all(&data).unwrap();
 }
 
-pub fn load<T: Serializable>(file: &mut File, key: &[u8]) -> Result<T, &'static str> {
+pub fn load<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8]) -> Result<T, &'static str> {
     let mut buffer = vec![];
     file.read_to_end(&mut buffer).unwrap();
-    let encoded: PassData = bincode::deserialize(&buffer).unwrap();
+    let encoded: E = bincode::deserialize(&buffer).unwrap();
     match encoded.decrypt::<T>(key) {
         Some(entry) => {
             match entry.sanity_check() {

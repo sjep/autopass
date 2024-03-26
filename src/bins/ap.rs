@@ -1,6 +1,6 @@
 use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
 
-use gui::{
+use pass::gui::{
     confirmbox::{Action, ConfirmBox},
     msgbox::launch_msgbox,
     pwdprompt::prompt_password,
@@ -9,8 +9,6 @@ use gui::{
     Windowed
 };
 use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
-
-mod gui;
 
 
 fn main() {

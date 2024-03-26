@@ -16,6 +16,7 @@ rand = "0.7.3"
 time = { version = "0.3.34", features = ["formatting", "local-offset"] }
 egui = { version = "0.26", optional = true }
 eframe = { version = "0.26", optional = true }
+aes-gcm = "0.10.3"
 
 [features]
 gui = ["egui", "eframe"]
@@ -23,10 +24,15 @@ cli = ["clap", "termion"]
 
 [[bin]]
 name = "apcli"
-path = "src/main.rs"
+path = "src/bins/apcli.rs"
 required-features = ["cli"]
 
 [[bin]]
 name = "ap"
-path = "src/ap.rs"
+path = "src/bins/ap.rs"
 required-features = ["gui"]
+
+[[bin]]
+name = "upgrader"
+path = "src/bins/upgrader.rs"
+required-features = ["cli"]
