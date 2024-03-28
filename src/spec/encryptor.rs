@@ -3,14 +3,15 @@ use aes_gcm::{
     Aes256Gcm, Nonce, Key
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use super::{Encryptor, SpecType};
+use crate::hash::{bin_to_str, TextMode};
+
+use super::Encryptor;
 
 
 #[derive(Serialize, Deserialize)]
 pub struct Encrypt {
-    spec_type: SpecType,
-    version: u16,
     nonce: [u8; 12],
     ciphertext: Vec<u8>
 }
@@ -26,8 +27,6 @@ impl Encryptor for Encrypt {
         let mut nonce: [u8; 12] = [0; 12];
         nonce.copy_from_slice(n.as_slice());
         Self {
-            spec_type: T::spec_type(),
-            version: T::version(),
             nonce,
             ciphertext
         }
@@ -43,11 +42,10 @@ impl Encryptor for Encrypt {
         T::from_binary(&plaintext)
     }
 
-    fn get_spec_type(&self) -> SpecType {
-        self.spec_type
-    }
-
-    fn get_version(&self) -> u16 {
-        self.version
+    fn filename(pass: &str, name: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(name.as_bytes());
+        let res = hasher.finalize();
+        bin_to_str(&res, &TextMode::AlphaNumeric, 32)
     }
 }

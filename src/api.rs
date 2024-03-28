@@ -3,10 +3,7 @@ use std::fs::{File, read_dir, remove_file};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::spec::encryptor::Encrypt;
-use crate::spec::{base_path, full_path};
-use crate::spec::{self};
-use crate::spec::service_v1::ServiceEntryV1;
+use crate::spec::{base_path, load, save, Encryptor, SpecType};
 use crate::hash::{bin_to_str, TextMode};
 
 
@@ -24,12 +21,19 @@ pub enum APError {
     #[error("Error during decryption")]
     Decryption,
     #[error("Password incorrect")]
-    PasswordIncorrect
+    PasswordIncorrect,
+    #[error("Wrong type, wanted {0:?} but got {1:?}")]
+    WrongType(SpecType, SpecType),
+    #[error("Wrong version, wanted {0} but got {1}")]
+    WrongVersion(u16, u16)
 }
 
+type ServiceType = crate::spec::service_v1::ServiceEntryV1;
+type EncryptorType = crate::spec::encryptor::Encrypt;
 
-pub fn exists(name: &str) -> bool {
-    spec::full_path(name).exists()
+
+pub fn exists(pass: &str, name: &str) -> bool {
+    EncryptorType::full_path(pass, name).exists()
 }
 
 pub fn create_key(pass: &str) -> Vec<u8> {
@@ -56,16 +60,16 @@ pub fn generate_pass(name: &str,
     bin_to_str(&pwbin, text_mode, len)
 }
 
-fn load_entry(name: &str, pass: &str) -> Result<ServiceEntryV1, APError> {
-    if !exists(name) {
+fn load_entry(name: &str, pass: &str) -> Result<ServiceType, APError> {
+    if !exists(pass, name) {
         return Err(APError::NotExist(name.to_owned()));
     }
 
-    let filename = spec::full_path(name);
+    let filename = EncryptorType::full_path(pass, name);
     let mut file = File::open(filename)?;
     let key = create_key(pass);
 
-    spec::load::<ServiceEntryV1, Encrypt>(&mut file, &key)
+    load::<ServiceType, EncryptorType>(&mut file, &key)
 }
 
 pub fn new<T: AsRef<str>>(
@@ -74,10 +78,10 @@ pub fn new<T: AsRef<str>>(
     text_mode: &TextMode,
     len: u8,
     kvs: &[(T, T)],
-    service_pass: Option<&str>) -> Result<ServiceEntryV1, APError>
+    service_pass: Option<&str>) -> Result<ServiceType, APError>
 {
 
-    if exists(name) {
+    if exists(pass, name) {
         return Err(APError::Exists(name.to_owned()))
     }
 
@@ -86,7 +90,7 @@ pub fn new<T: AsRef<str>>(
         Some(s) => s.to_string()
     };
 
-    let entry = ServiceEntryV1::new(
+    let entry = ServiceType::new(
         name,
         &password,
         0u8,
@@ -97,9 +101,9 @@ pub fn new<T: AsRef<str>>(
     let h2 = create_key(pass);
     let path = base_path();
     std::fs::create_dir_all(path)?;
-    let full_path = full_path(entry.get_name());
+    let full_path = EncryptorType::full_path(pass, entry.get_name());
     let mut file = File::create(full_path)?;
-    spec::save::<ServiceEntryV1, Encrypt>(&mut file, &h2, &entry);
+    save::<ServiceType, EncryptorType>(&mut file, &h2, &entry);
     Ok(entry)
 }
 
@@ -114,7 +118,7 @@ pub fn get(name: &str,
 }
 
 pub fn get_all(name: &str,
-               pass: &str) -> Result<ServiceEntryV1, APError> {
+               pass: &str) -> Result<ServiceType, APError> {
     load_entry(name, pass)
 }
 
@@ -124,14 +128,14 @@ pub fn set_kvs(name: &str,
                reset: bool) -> Result<(), APError> {
     let mut entry = load_entry(&name, &pass)?;
     entry.set_kvs(kvs, reset);
-    let full_path = full_path(entry.get_name());
+    let full_path = EncryptorType::full_path(pass, entry.get_name());
     let mut file = File::create(full_path)?;
-    spec::save::<ServiceEntryV1, Encrypt>(&mut file, &create_key(pass), &entry);
+    save::<ServiceType, EncryptorType>(&mut file, &create_key(pass), &entry);
     Ok(())
 }
 
 pub fn empty() -> Result<bool, APError> {
-    let dir = spec::base_path();
+    let dir = base_path();
     if !dir.exists() {
         return Ok(true);
     }
@@ -141,7 +145,7 @@ pub fn empty() -> Result<bool, APError> {
 }
 
 pub fn list(pass: &str) -> Vec<String> {
-    let dir = spec::base_path();
+    let dir = base_path();
     if !dir.exists() {
         return vec![];
     }
@@ -153,7 +157,7 @@ pub fn list(pass: &str) -> Vec<String> {
         }
         let mut file = File::open(filename.path()).unwrap();
         let key = create_key(pass);
-        if let Ok(entry) = spec::load::<ServiceEntryV1, Encrypt>(&mut file, &key) {
+        if let Ok(entry) = load::<ServiceType, EncryptorType>(&mut file, &key) {
             names.push(entry.get_name().to_string());
         }
     }
@@ -176,9 +180,9 @@ pub fn upgrade(name: &str,
             };
             let old_pass = entry.get_pass(false).unwrap().to_string();
             entry.set_pass(&new_pass);
-            let full_path = full_path(entry.get_name());
+            let full_path = EncryptorType::full_path(pass, entry.get_name());
             let mut file = File::create(full_path).unwrap();
-            spec::save::<ServiceEntryV1, Encrypt>(&mut file, &create_key(pass), &entry);
+            save::<ServiceType, EncryptorType>(&mut file, &create_key(pass), &entry);
             Ok((old_pass, new_pass))
         },
         Err(s) => {
@@ -187,8 +191,8 @@ pub fn upgrade(name: &str,
     }
 }
 
-pub fn delete(name: &str) -> Result<(), String> {
-   match remove_file(spec::full_path(name)) {
+pub fn delete(name: &str, pass: &str) -> Result<(), String> {
+   match remove_file(EncryptorType::full_path(pass, name)) {
        Ok(_) => Ok(()),
        Err(e) => Err(e.to_string())
    }

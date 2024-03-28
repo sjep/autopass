@@ -2,7 +2,7 @@ use std::{fs::File, path::Path};
 
 use thiserror::Error;
 
-use crate::{api::{self, APError}, spec::{self, base_path, filename, load, save, Encryptor, Serializable}};
+use crate::{api::{self, APError}, spec::{self, base_path, load, save, Encryptor, Serializable}};
 
 
 #[derive(Error, Debug)]
@@ -42,9 +42,10 @@ pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: Serializable>(pass: &str
         return Err(APUpgradeError::InProgress);
     }
     for objname in &list::<_, O, T>(base_path(), &key) {
-        let objfilename = filename(objname);
-        let newobjpath = base_path().join(&objfilename);
-        let oldobjpath = legacy_dir.clone().join(&objfilename);
+        let newfilename = N::filename(&pass, objname);
+        let oldfilename = O::filename(&pass, objname);
+        let newobjpath = base_path().join(&newfilename);
+        let oldobjpath = legacy_dir.clone().join(&oldfilename);
         std::fs::rename(&newobjpath, &oldobjpath).unwrap();
 
         let mut oldfile = File::open(&oldobjpath).unwrap();

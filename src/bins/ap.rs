@@ -68,7 +68,7 @@ struct DeleteService {
 
 impl Action<ApCtx> for Box<DeleteService> {
     fn doit(&mut self, apctx: &mut ApCtx) {
-        if let Err(e) = api::delete(&self.service) {
+        if let Err(e) = api::delete(&self.service, &apctx.masterpwd) {
             eprintln!("Error deleting service {}: {}", self.service, e);
         } else {
             apctx.refresh_service_list = true;

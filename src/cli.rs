@@ -98,9 +98,17 @@ fn fetch_kvs<'a>(matches: &'a ArgMatches) -> Result<Vec<(&'a str, &'a str)>, &'s
 
 
 fn new_cmd(matches: &ArgMatches) {
+    let pass = match read_pass(true) {
+        None => {
+            println!("Passwords don't match");
+            return;
+        },
+        Some(p) => p
+    };
+
     let name = matches.value_of("name").unwrap();
     println!("Adding '{}' as new service", name);
-    if api::exists(name) {
+    if api::exists(&pass, name) {
         println!("{} already exists", name);
         return;
     }
@@ -137,13 +145,6 @@ fn new_cmd(matches: &ArgMatches) {
 
     let set_password = matches.value_of("set-password");
 
-    let pass = match read_pass(true) {
-        None => {
-            println!("Passwords don't match");
-            return;
-        },
-        Some(p) => p
-    };
     match api::new(name, &pass, &text_mode, len, &kvs, set_password)  {
         Ok(entry) => println!("New password created for service '{}':\n{}", name, entry.get_pass(false).unwrap()),
         Err(s) => println!("Error creating service: {}", s)
@@ -152,8 +153,9 @@ fn new_cmd(matches: &ArgMatches) {
 
 
 fn get_cmd(matches: &ArgMatches) {
+    let pass = read_pass(false).unwrap();
     let name = matches.value_of("name").unwrap();
-    if !api::exists(name) {
+    if !api::exists(&pass, name) {
         println!("{} does not exist", name);
         return;
     }
@@ -161,7 +163,7 @@ fn get_cmd(matches: &ArgMatches) {
     let clipboard = matches.is_present("clipboard");
 
     let all = matches.is_present("all");
-    let pass = read_pass(false).unwrap();
+    
     match all {
         false => {
             match api::get(name, &pass, clipboard) {
@@ -194,8 +196,9 @@ fn list_cmd(matches: &ArgMatches) {
 
 
 fn setkv_cmd(matches: &ArgMatches) {
+    let pass = read_pass(false).unwrap();
     let name = matches.value_of("name").unwrap();
-    if !api::exists(name) {
+    if !api::exists(&pass, name) {
         println!("{} does not exist", name);
         return;
     }
@@ -214,8 +217,9 @@ fn setkv_cmd(matches: &ArgMatches) {
 
 
 fn upgrade_cmd(matches: &ArgMatches) {
+    let pass = read_pass(false).unwrap();
     let name = matches.value_of("name").unwrap();
-    if !api::exists(name) {
+    if !api::exists(&pass, name) {
         println!("{} does not exist", name);
         return;
     }
@@ -231,12 +235,13 @@ fn upgrade_cmd(matches: &ArgMatches) {
 
 
 fn delete_cmd(matches: &ArgMatches) {
+    let pass = read_pass(false).unwrap();
     let name = matches.value_of("name").unwrap();
-    if !api::exists(name) {
+    if !api::exists(&pass, name) {
         println!("{} does not exist", name);
         return;
     }
-    api::delete(name).unwrap();
+    api::delete(&pass, name).unwrap();
     println!("Service {} deleted.", name);
 }
 
