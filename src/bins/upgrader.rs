@@ -1,8 +1,8 @@
-use pass::spec::{encryptor::Encrypt, encryptor_legacy::PassData, service_v1::ServiceEntryV1};
+use pass::spec::{encryptor::Encrypt, service_v1::ServiceEntryV1};
 
 
 type Current = ServiceEntryV1;
-type OldEncryptor = PassData;
+type OldEncryptor = Encrypt;
 type NewEncryptor = Encrypt;
 
 fn main() {

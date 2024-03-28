@@ -1,26 +1,28 @@
+
 use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
 
-use pass::gui::{
+use pass::{api::APError, gui::{
     confirmbox::{Action, ConfirmBox},
     msgbox::launch_msgbox,
     pwdprompt::prompt_password,
     validator::{textedit, LengthBounds, NotEmpty, NotInList, ValidString},
     Display,
     Windowed
-};
+}};
 use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
 
 
-fn main() {
-    let pwd = if api::empty() {
+fn main() -> Result<(), APError> {
+    let empty = api::empty()?;
+    let pwd = if empty {
         let pwd1 = prompt_password("New master password");
         if pwd1 == "" {
-            return;
+            return Ok(());
         }
         let pwd2 = prompt_password("Confirm new master password");
         if pwd1 != pwd2 {
             launch_msgbox("Passwords didn't match".to_owned(), "Mismatch".to_owned());
-            return;
+            return Ok(());
         }
         pwd1
     } else {
@@ -30,6 +32,7 @@ fn main() {
     if pwd != "" {
         launch_ap(pwd);
     }
+    Ok(())
 }
 
 fn launch_ap(pwd: String) {

@@ -1,7 +1,17 @@
 use std::{fs::File, path::Path};
 
-use crate::{api, spec::{self, base_path, filename, load, save, Encryptor, Serializable}};
+use thiserror::Error;
 
+use crate::{api::{self, APError}, spec::{self, base_path, filename, load, save, Encryptor, Serializable}};
+
+
+#[derive(Error, Debug)]
+pub enum APUpgradeError {
+    #[error("Internal AP error: {0}")]
+    APError(#[from] APError),
+    #[error("In Progress")]
+    InProgress
+}
 
 pub fn list<P: AsRef<Path>, E: Encryptor, T: Serializable>(path: P, key: &[u8]) -> Vec<String> {
     let path = path.as_ref();
@@ -23,13 +33,13 @@ pub fn list<P: AsRef<Path>, E: Encryptor, T: Serializable>(path: P, key: &[u8]) 
     names
 }
 
-pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: Serializable>(pass: &str) -> Result<(), &'static str> {
+pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: Serializable>(pass: &str) -> Result<(), APUpgradeError> {
     let key = api::create_key(pass);
     let legacy_dir = base_path().join("legacy");
     std::fs::create_dir_all(&legacy_dir).unwrap();
     let inprogress = legacy_dir.read_dir().unwrap().next().is_some();
     if inprogress {
-        return Err("Upgrade currently in progress");
+        return Err(APUpgradeError::InProgress);
     }
     for objname in &list::<_, O, T>(base_path(), &key) {
         let objfilename = filename(objname);

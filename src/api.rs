@@ -1,10 +1,31 @@
 use std::fs::{File, read_dir, remove_file};
 
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+
 use crate::spec::encryptor::Encrypt;
 use crate::spec::{base_path, full_path};
 use crate::spec::{self};
 use crate::spec::service_v1::ServiceEntryV1;
-use crate::hash::{HashAlg, get_digest, bin_to_str, TextMode};
+use crate::hash::{bin_to_str, TextMode};
+
+
+
+#[derive(Error, Debug)]
+pub enum APError {
+    #[error("Io Error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] Box<bincode::ErrorKind>),
+    #[error("Entry {0} already exists")]
+    Exists(String),
+    #[error("Entry {0} doesn't exist")]
+    NotExist(String),
+    #[error("Error during decryption")]
+    Decryption,
+    #[error("Password incorrect")]
+    PasswordIncorrect
+}
 
 
 pub fn exists(name: &str) -> bool {
@@ -12,11 +33,9 @@ pub fn exists(name: &str) -> bool {
 }
 
 pub fn create_key(pass: &str) -> Vec<u8> {
-    let mut digest = get_digest(HashAlg::SHA256);
-    let mut key = vec![0; digest.output_bytes()];
-    digest.input(pass.as_bytes());
-    digest.result(&mut key);
-    key
+    let mut hasher = Sha256::new();
+    hasher.update(pass.as_bytes());
+    hasher.finalize().to_vec()
 }
 
 pub fn generate_pass(name: &str,
@@ -24,31 +43,26 @@ pub fn generate_pass(name: &str,
                      nonce: u8,
                      len: u8,
                      text_mode: &TextMode) -> String {
-    let mut digest = get_digest(HashAlg::SHA256);
-    let mut h1 = vec![0; digest.output_bytes()];
-    digest.input(name.as_bytes());
-    digest.result(&mut h1);
-    digest.reset();
+    let mut digest = Sha256::new();
+    digest.update(name.as_bytes());
+    let h1 = digest.finalize();
     let h2 = create_key(pass);
-    let mut pwbin = vec![0; digest.output_bytes()];
-    digest.input(std::slice::from_ref(&nonce));
-    digest.input(&h1);
-    digest.input(&h2);
-    digest.result(&mut pwbin);
-    digest.reset();
+
+    let mut digest = Sha256::new();
+    digest.update(std::slice::from_ref(&nonce));
+    digest.update(&h1);
+    digest.update(&h2);
+    let pwbin = digest.finalize();
     bin_to_str(&pwbin, text_mode, len)
 }
 
-fn load_entry(name: &str, pass: &str) -> Result<ServiceEntryV1, &'static str> {
+fn load_entry(name: &str, pass: &str) -> Result<ServiceEntryV1, APError> {
     if !exists(name) {
-        return Err("Service doesn't exist");
+        return Err(APError::NotExist(name.to_owned()));
     }
 
     let filename = spec::full_path(name);
-    let mut file = match File::open(filename) {
-        Err(_) => return Err("Error opening file"),
-        Ok(f) => f
-    };
+    let mut file = File::open(filename)?;
     let key = create_key(pass);
 
     spec::load::<ServiceEntryV1, Encrypt>(&mut file, &key)
@@ -60,11 +74,11 @@ pub fn new<T: AsRef<str>>(
     text_mode: &TextMode,
     len: u8,
     kvs: &[(T, T)],
-    service_pass: Option<&str>) -> Result<ServiceEntryV1, String>
+    service_pass: Option<&str>) -> Result<ServiceEntryV1, APError>
 {
 
     if exists(name) {
-        return Err(format!("Service '{}' already exists", name))
+        return Err(APError::Exists(name.to_owned()))
     }
 
     let password = match service_pass {
@@ -82,20 +96,17 @@ pub fn new<T: AsRef<str>>(
     );
     let h2 = create_key(pass);
     let path = base_path();
-    std::fs::create_dir_all(path).unwrap();
+    std::fs::create_dir_all(path)?;
     let full_path = full_path(entry.get_name());
-    let mut file = File::create(full_path).unwrap();
+    let mut file = File::create(full_path)?;
     spec::save::<ServiceEntryV1, Encrypt>(&mut file, &h2, &entry);
     Ok(entry)
 }
 
 pub fn get(name: &str,
            pass: &str,
-           clipboard: bool) -> Result<Option<String>, &'static str> {
-    let entry = match load_entry(&name, &pass) {
-        Ok(entry) => entry,
-        Err(s) => return Err(s)
-    };
+           clipboard: bool) -> Result<Option<String>, APError> {
+    let entry = load_entry(&name, &pass)?;
     Ok(match entry.get_pass(clipboard) {
         Some(pass) => Some(pass.to_string()),
         None => None
@@ -103,35 +114,30 @@ pub fn get(name: &str,
 }
 
 pub fn get_all(name: &str,
-               pass: &str) -> Result<ServiceEntryV1, &'static str> {
+               pass: &str) -> Result<ServiceEntryV1, APError> {
     load_entry(name, pass)
 }
 
 pub fn set_kvs(name: &str,
                pass: &str,
                kvs: &[(&str, &str)],
-               reset: bool) -> Result<(), &'static str> {
-    match load_entry(&name, &pass) {
-        Ok(mut entry) => {
-            entry.set_kvs(kvs, reset);
-            let full_path = full_path(entry.get_name());
-            let mut file = File::create(full_path).unwrap();
-            spec::save::<ServiceEntryV1, Encrypt>(&mut file, &create_key(pass), &entry);
-            Ok(())
-        },
-        Err(s) => Err(s)
-    }
+               reset: bool) -> Result<(), APError> {
+    let mut entry = load_entry(&name, &pass)?;
+    entry.set_kvs(kvs, reset);
+    let full_path = full_path(entry.get_name());
+    let mut file = File::create(full_path)?;
+    spec::save::<ServiceEntryV1, Encrypt>(&mut file, &create_key(pass), &entry);
+    Ok(())
 }
 
-pub fn empty() -> bool {
+pub fn empty() -> Result<bool, APError> {
     let dir = spec::base_path();
     if !dir.exists() {
-        return true;
+        return Ok(true);
     }
-    read_dir(dir)
-        .unwrap()
+    Ok(read_dir(dir)?
         .nth(0)
-        .is_none()
+        .is_none())
 }
 
 pub fn list(pass: &str) -> Vec<String> {
@@ -157,7 +163,7 @@ pub fn list(pass: &str) -> Vec<String> {
 
 pub fn upgrade(name: &str,
                pass: &str,
-               service_pass: Option<&str>) -> Result<(String, String), &'static str> {
+               service_pass: Option<&str>) -> Result<(String, String), APError> {
     match load_entry(&name, &pass) {
         Ok(mut entry) => {
 

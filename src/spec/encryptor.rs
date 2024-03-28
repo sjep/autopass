@@ -42,4 +42,12 @@ impl Encryptor for Encrypt {
         
         T::from_binary(&plaintext)
     }
+
+    fn get_spec_type(&self) -> SpecType {
+        self.spec_type
+    }
+
+    fn get_version(&self) -> u16 {
+        self.version
+    }
 }
