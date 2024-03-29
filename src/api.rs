@@ -22,10 +22,6 @@ pub enum APError {
     Decryption,
     #[error("Password incorrect")]
     PasswordIncorrect,
-    #[error("Wrong type, wanted {0:?} but got {1:?}")]
-    WrongType(SpecType, SpecType),
-    #[error("Wrong version, wanted {0} but got {1}")]
-    WrongVersion(u16, u16),
     #[error("Wrong encryptionversion, wanted {0} but got {1}")]
     WrongEncryptVersion(u16, u16),
 }
@@ -151,12 +147,8 @@ pub fn list(pass: &str) -> Result<Vec<String>, APError> {
         return Ok(vec![]);
     }
     let mut names: Vec<String> = vec![];
-    for fbuf in read_dir(dir)? {
-        let filename = fbuf?;
-        if filename.file_type()?.is_dir() {
-            continue;
-        }
-        let mut file = File::open(filename.path())?;
+    for filename in &crate::spec::list(&dir, Some(SpecType::Service), None)? {
+        let mut file = File::open(filename)?;
         let key = EncryptorType::key(pass);
         let entry = load::<ServiceType, EncryptorType>(&mut file, &key)?;
         names.push(entry.get_name().to_string());

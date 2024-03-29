@@ -159,11 +159,11 @@ impl Serializable for ServiceEntryV1 {
         self.pad == 0
     }
 
-    fn version() -> u16 {
+    fn version(&self) -> u16 {
         1
     }
 
-    fn spec_type() -> super::SpecType {
+    fn spec_type(&self) -> super::SpecType {
         super::SpecType::Service
     }
 }

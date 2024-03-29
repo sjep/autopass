@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, path::{Path, PathBuf}};
+use std::{fs::{read_dir, File}, io::{Read, Write}, path::{Path, PathBuf}};
 
 use serde::{Deserialize, Serialize};
 
@@ -33,9 +33,9 @@ pub trait Serializable: Sized {
 
     fn sanity_check(&self) -> bool;
 
-    fn version() -> u16;
+    fn version(&self) -> u16;
 
-    fn spec_type() -> SpecType;
+    fn spec_type(&self) -> SpecType;
 }
 
 pub trait Encryptor: Serialize + for <'a> Deserialize<'a> {
@@ -54,32 +54,48 @@ pub trait Encryptor: Serialize + for <'a> Deserialize<'a> {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct Header {
+    spec_type: SpecType,
+    spec_version: u16,
+    encrypt_version: u16
+}
+
+const HEADER_SIZE: usize = 8;
+
+impl Header {
+    fn create<T: Serializable, E: Encryptor>(entry: &T) -> Self {
+        Self {
+            spec_type: entry.spec_type(),
+            spec_version: entry.version(),
+            encrypt_version: E::encrypt_version()
+        }
+    }
+}
+
 pub fn save<T: Serializable>(file: &mut File, key: &[u8], service: &T) -> Result<(), APError> {
     let encrypted = EncryptorType::encrypt(key, service);
-    let data = bincode::serialize(&(T::spec_type(), T::version(), EncryptorType::encrypt_version(), &encrypted)).unwrap();
+    let header = Header::create::<T, EncryptorType>(service);
+    let headerdata = bincode::serialize(&header)?;
+    assert!(headerdata.len() == HEADER_SIZE);
+    let data = bincode::serialize(&encrypted)?;
+    file.write_all(&headerdata)?;
     file.write_all(&data)?;
     Ok(())
 }
 
-pub fn get_spec_version(file: &mut File) -> Result<(SpecType, u16, u16), APError> {
-    let (spec, version, encrypt_version) = bincode::deserialize_from(file)?;
-    Ok((spec, version, encrypt_version))
-}
-
 pub fn load<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8]) -> Result<T, APError> {
 
-    let (spec, version, encrypt_version, encoded): (SpecType, u16, u16, E) = bincode::deserialize_from(file)?;
-    if spec != T::spec_type() {
-        return Err(APError::WrongType(T::spec_type(), spec));
-    }
-    if version != T::version() {
-        return Err(APError::WrongVersion(T::version(), version));
-    }
-    if encrypt_version != E::encrypt_version() {
-        return Err(APError::WrongEncryptVersion(E::encrypt_version(), encrypt_version));
+    let mut data = vec![];
+    file.read_to_end(&mut data)?;
+    let header = bincode::deserialize::<Header>(&data[0..HEADER_SIZE])?;
+
+    if header.encrypt_version != E::encrypt_version() {
+        return Err(APError::WrongEncryptVersion(E::encrypt_version(), header.encrypt_version));
     }
 
-    match encoded.decrypt::<T>(key) {
+    let encoder = bincode::deserialize::<EncryptorType>(&data[HEADER_SIZE..data.len()])?;
+    match encoder.decrypt::<T>(key) {
         Some(entry) => {
             match entry.sanity_check() {
                 true => Ok(entry),
@@ -88,4 +104,35 @@ pub fn load<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8]) -> Resul
         },
         None => Err(APError::Decryption)
     }
+}
+
+pub fn list<P: AsRef<Path>>(basedir: P, by_spec: Option<SpecType>, by_version: Option<u16>) -> Result<Vec<PathBuf>, APError> {
+    let dir = basedir.as_ref();
+    let mut data = [0u8; HEADER_SIZE];
+    let mut entries = vec![];
+
+    if !dir.exists() {
+        return Ok(entries);
+    }
+    for fbuf in read_dir(dir)? {
+        let filename = fbuf?;
+        if filename.file_type()?.is_dir() {
+            continue;
+        }
+        let mut file = File::open(filename.path())?;
+        file.read_exact(&mut data)?;
+        let header = bincode::deserialize::<Header>(&data[0..HEADER_SIZE])?;
+        if let Some(spec) = by_spec {
+            if spec != header.spec_type {
+                continue;
+            }
+        }
+        if let Some(version) = by_version {
+            if version != header.spec_version {
+                continue;
+            }
+        }
+        entries.push(filename.path());
+    }
+    Ok(entries)
 }
