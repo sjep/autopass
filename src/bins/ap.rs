@@ -445,7 +445,10 @@ struct ApApp {
 
 impl ApApp {
     fn new(pwd: String) -> Self {
-        let services: Vec<String> = api::list(&pwd);
+        let services: Vec<String> = api::list(&pwd).unwrap_or_else(|e| {
+            eprintln!("Error listing entries: {}", e);
+            vec![]
+        });
 
         Self {
             current: None,
@@ -459,7 +462,10 @@ impl eframe::App for ApApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 
         if self.ctx.refresh_service_list {
-            self.ctx.services = api::list(&self.ctx.masterpwd);
+            self.ctx.services = api::list(&self.ctx.masterpwd).unwrap_or_else(|e| {
+                eprintln!("Error listing entries: {}", e);
+                vec![]
+            });
             self.ctx.refresh_service_list = false;
             self.current = None;
         }

@@ -10,6 +10,7 @@ pub mod encryptor;
 pub const PASS_PATH: &'static str = ".pass";
 pub const PASS_BASE_ENVVAR: &'static str = "AP_BASEDIR";
 
+type EncryptorType = crate::spec::encryptor::Encrypt;
 
 pub fn base_path() -> PathBuf {
     if let Ok(basepath) = std::env::var(PASS_BASE_ENVVAR) {
@@ -42,32 +43,40 @@ pub trait Encryptor: Serialize + for <'a> Deserialize<'a> {
 
     fn decrypt<T: Serializable>(&self, key: &[u8]) -> Option<T>;
 
-    fn filename(pass: &str, name: &str) -> String;
+    fn encrypt_version() -> u16;
 
-    fn full_path(pass: &str, name: &str) -> PathBuf {
-        Path::join(&base_path(), Path::new(&Self::filename(pass, name)))
+    fn key(pass: &str) -> Vec<u8>;
+
+    fn filename(key: &[u8], name: &str) -> String;
+
+    fn full_path(key: &[u8], name: &str) -> PathBuf {
+        Path::join(&base_path(), Path::new(&Self::filename(key, name)))
     }
 }
 
-pub fn save<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8], service: &T) {
-    let encrypted = E::encrypt(key, service);
-    let data = bincode::serialize(&(T::spec_type(), T::version(), &encrypted)).unwrap();
-    file.write_all(&data).unwrap();
+pub fn save<T: Serializable>(file: &mut File, key: &[u8], service: &T) -> Result<(), APError> {
+    let encrypted = EncryptorType::encrypt(key, service);
+    let data = bincode::serialize(&(T::spec_type(), T::version(), EncryptorType::encrypt_version(), &encrypted)).unwrap();
+    file.write_all(&data)?;
+    Ok(())
 }
 
-pub fn get_spec_version(file: &mut File) -> Result<(SpecType, u16), APError> {
-    let (spec, version) = bincode::deserialize_from(file)?;
-    Ok((spec, version))
+pub fn get_spec_version(file: &mut File) -> Result<(SpecType, u16, u16), APError> {
+    let (spec, version, encrypt_version) = bincode::deserialize_from(file)?;
+    Ok((spec, version, encrypt_version))
 }
 
 pub fn load<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8]) -> Result<T, APError> {
 
-    let (spec, version, encoded): (SpecType, u16, E) = bincode::deserialize_from(file)?;
+    let (spec, version, encrypt_version, encoded): (SpecType, u16, u16, E) = bincode::deserialize_from(file)?;
     if spec != T::spec_type() {
         return Err(APError::WrongType(T::spec_type(), spec));
     }
     if version != T::version() {
         return Err(APError::WrongVersion(T::version(), version));
+    }
+    if encrypt_version != E::encrypt_version() {
+        return Err(APError::WrongEncryptVersion(E::encrypt_version(), encrypt_version));
     }
 
     match encoded.decrypt::<T>(key) {

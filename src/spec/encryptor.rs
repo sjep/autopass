@@ -42,10 +42,21 @@ impl Encryptor for Encrypt {
         T::from_binary(&plaintext)
     }
 
-    fn filename(pass: &str, name: &str) -> String {
-        let mut hasher = Sha256::new();
+    fn key(pass: &str) -> Vec<u8> {
+        let mut hasher = Sha256::default();
+        hasher.update(pass.as_bytes());
+        hasher.finalize().to_vec()
+    }
+
+    fn filename(key: &[u8], name: &str) -> String {
+        let mut hasher = Sha256::default();
+        hasher.update(&key);
         hasher.update(name.as_bytes());
         let res = hasher.finalize();
         bin_to_str(&res, &TextMode::AlphaNumeric, 32)
+    }
+
+    fn encrypt_version() -> u16 {
+        2
     }
 }

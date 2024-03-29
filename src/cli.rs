@@ -189,8 +189,15 @@ fn list_cmd(matches: &ArgMatches) {
     if !matches.is_present("simple") {
         println!("\nServices\n--------");
     }
-    for n in api::list(&pass) {
-        println!("{}", n);
+    match api::list(&pass) {
+        Ok(items) => {
+            for n in items {
+                println!("{}", n);
+            }
+        }
+        Err(e) => {
+            println!("Error listing services: {}", e);
+        }
     }
 }
 

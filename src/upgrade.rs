@@ -1,8 +1,8 @@
-use std::{fs::File, path::Path};
+use std::fs::File;
 
 use thiserror::Error;
 
-use crate::{api::{self, APError}, spec::{self, base_path, load, save, Encryptor, Serializable}};
+use crate::{api::{self, APError}, spec::{base_path, load, save, Encryptor, Serializable}};
 
 
 #[derive(Error, Debug)]
@@ -13,45 +13,37 @@ pub enum APUpgradeError {
     InProgress
 }
 
-pub fn list<P: AsRef<Path>, E: Encryptor, T: Serializable>(path: P, key: &[u8]) -> Vec<String> {
-    let path = path.as_ref();
-    if !path.exists() {
-        return vec![];
-    }
-    let mut names: Vec<String> = vec![];
-    for fbuf in std::fs::read_dir(path).unwrap() {
-        let filename = fbuf.unwrap();
-        if filename.file_type().unwrap().is_dir() {
-            continue;
-        }
-        let mut file = File::open(filename.path()).unwrap();
-        if let Ok(entry) = spec::load::<T, E>(&mut file, &key) {
-            names.push(entry.name().to_string());
-        }
-    }
-    names.sort();
-    names
+fn try_open<O: Encryptor, T: Serializable>(objname: &str, key: &[u8]) -> bool {
+    let path = O::full_path(key, objname);
+    File::open(&path).ok().map(|mut f| {
+        load::<T, O>(&mut f, &key).ok()
+    }).flatten().is_some()
 }
 
 pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: Serializable>(pass: &str) -> Result<(), APUpgradeError> {
-    let key = api::create_key(pass);
     let legacy_dir = base_path().join("legacy");
     std::fs::create_dir_all(&legacy_dir).unwrap();
     let inprogress = legacy_dir.read_dir().unwrap().next().is_some();
     if inprogress {
         return Err(APUpgradeError::InProgress);
     }
-    for objname in &list::<_, O, T>(base_path(), &key) {
-        let newfilename = N::filename(&pass, objname);
-        let oldfilename = O::filename(&pass, objname);
+    for objname in &api::list(pass)? {
+        if try_open::<N, T>(objname, &N::key(pass)) {
+            println!("Skipping {}", objname);
+            continue;
+        }
+        let newkey = N::key(pass);
+        let oldkey = O::key(pass);
+        let newfilename = N::filename(&newkey, objname);
+        let oldfilename = O::filename(&oldkey, objname);
         let newobjpath = base_path().join(&newfilename);
         let oldobjpath = legacy_dir.clone().join(&oldfilename);
-        std::fs::rename(&newobjpath, &oldobjpath).unwrap();
+        std::fs::rename(&base_path().join(oldfilename), &oldobjpath).unwrap();
 
         let mut oldfile = File::open(&oldobjpath).unwrap();
-        let entry = load::<T, O>(&mut oldfile, &key)?;
+        let entry = load::<T, O>(&mut oldfile, &oldkey)?;
         let mut newfile = File::create(&newobjpath).unwrap();
-        save::<T, N>(&mut newfile, &key, &entry);
+        save::<T>(&mut newfile, &newkey, &entry)?;
         std::fs::remove_file(&oldobjpath).unwrap();
         println!("Saved entry {}", entry.name());
     }
