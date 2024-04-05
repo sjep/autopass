@@ -3,7 +3,8 @@ use std::fs::{File, read_dir, remove_file};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::spec::{base_path, load, save, Encryptor, SpecType};
+use crate::spec::identity_v1::identity_path;
+use crate::spec::{base_path, load, save, APKey, Encryptor, Serializable, SpecType};
 use crate::hash::{bin_to_str, TextMode};
 
 
@@ -18,6 +19,10 @@ pub enum APError {
     Exists(String),
     #[error("Entry {0} doesn't exist")]
     NotExist(String),
+    #[error("Must run init command before creating entries")]
+    NotInited,
+    #[error("Already inited")]
+    AlreadyInited,
     #[error("Error during decryption")]
     Decryption,
     #[error("Password incorrect")]
@@ -27,6 +32,7 @@ pub enum APError {
 }
 
 type ServiceType = crate::spec::service_v1::ServiceEntryV1;
+type IdentityType = crate::spec::identity_v1::IdentityV1;
 type EncryptorType = crate::spec::encryptor::Encrypt;
 
 
@@ -35,19 +41,20 @@ fn exists_int(key: &[u8], name: &str) -> bool {
 }
 
 pub fn exists(pass: &str, name: &str) -> bool {
-    let key = EncryptorType::key(pass);
-    exists_int(&key, name)
+    load_id(pass)
+        .map(|id| exists_int(&id.key(), name))
+        .unwrap_or(false)
 }
 
 pub fn generate_pass(name: &str,
-                     pass: &str,
+                     key: &APKey,
                      nonce: u8,
                      len: u8,
                      text_mode: &TextMode) -> String {
     let mut digest = Sha256::new();
     digest.update(name.as_bytes());
     let h1 = digest.finalize();
-    let h2 = EncryptorType::key(pass);
+    let h2 = key;
 
     let mut digest = Sha256::new();
     digest.update(std::slice::from_ref(&nonce));
@@ -57,8 +64,23 @@ pub fn generate_pass(name: &str,
     bin_to_str(&pwbin, text_mode, len)
 }
 
-fn load_entry(name: &str, pass: &str) -> Result<(ServiceType, Vec<u8>), APError> {
-    let key = EncryptorType::key(pass);
+fn load_id(pass: &str) -> Result<IdentityType, APError> {
+    let key = EncryptorType::genkey(pass);
+    let idpath = identity_path(base_path());
+    if !idpath.exists() {
+        return Err(APError::NotInited);
+    }
+
+    let mut file = File::open(idpath)?;
+    let id = load::<IdentityType, EncryptorType>(&mut file, &key)?;
+    if !id.sanity_check() {
+        return Err(APError::PasswordIncorrect);
+    }
+    Ok(id)
+}
+
+fn load_entry(name: &str, pass: &str) -> Result<(ServiceType, APKey), APError> {
+    let key = load_id(pass)?.key();
     if !exists_int(&key, name) {
         return Err(APError::NotExist(name.to_owned()));
     }
@@ -69,6 +91,25 @@ fn load_entry(name: &str, pass: &str) -> Result<(ServiceType, Vec<u8>), APError>
     Ok((load::<ServiceType, EncryptorType>(&mut file, &key)?, key))
 }
 
+pub fn init<T: AsRef<str>>(
+    name: &str,
+    pass: &str,
+    kvs: &[(T, T)]) -> Result<IdentityType, APError>
+{
+    let key = EncryptorType::genkey(pass);
+    let idpath = identity_path(base_path());
+    if idpath.exists() {
+        return Err(APError::AlreadyInited);
+    }
+
+    std::fs::create_dir_all(base_path())?;
+
+    let mut file = File::create(idpath)?;
+    let id = IdentityType::new(name, &key, kvs);
+    save(&mut file, &key, &id)?;
+    Ok(id)
+}
+
 pub fn new<T: AsRef<str>>(
     name: &str,
     pass: &str,
@@ -77,14 +118,14 @@ pub fn new<T: AsRef<str>>(
     kvs: &[(T, T)],
     service_pass: Option<&str>) -> Result<ServiceType, APError>
 {
-    let key = EncryptorType::key(pass);
+    let key = load_id(pass)?.key();
 
     if exists_int(&key, name) {
         return Err(APError::Exists(name.to_owned()))
     }
 
     let password = match service_pass {
-        None => generate_pass(name, pass, 0u8, len, text_mode),
+        None => generate_pass(name, &key, 0u8, len, text_mode),
         Some(s) => s.to_string()
     };
 
@@ -100,7 +141,7 @@ pub fn new<T: AsRef<str>>(
     std::fs::create_dir_all(path)?;
     let full_path = EncryptorType::full_path(&key, entry.get_name());
     let mut file = File::create(full_path)?;
-    save::<ServiceType>(&mut file, &key, &entry)?;
+    save(&mut file, &key, &entry)?;
     Ok(entry)
 }
 
@@ -127,7 +168,7 @@ pub fn set_kvs(name: &str,
     entry.set_kvs(kvs, reset);
     let full_path = EncryptorType::full_path(&key, entry.get_name());
     let mut file = File::create(full_path)?;
-    save::<ServiceType>(&mut file, &EncryptorType::key(pass), &entry)?;
+    save(&mut file, &key, &entry)?;
     Ok(())
 }
 
@@ -143,13 +184,11 @@ pub fn empty() -> Result<bool, APError> {
 
 pub fn list(pass: &str) -> Result<Vec<String>, APError> {
     let dir = base_path();
-    if !dir.exists() {
-        return Ok(vec![]);
-    }
+    let key = load_id(pass)?.key();
+
     let mut names: Vec<String> = vec![];
     for filename in &crate::spec::list(&dir, Some(SpecType::Service), None)? {
         let mut file = File::open(filename)?;
-        let key = EncryptorType::key(pass);
         let entry = load::<ServiceType, EncryptorType>(&mut file, &key)?;
         names.push(entry.get_name().to_string());
     }
@@ -167,14 +206,14 @@ pub fn upgrade(name: &str,
                 Some(s) => s.to_string(),
                 None => {
                     let nonce = entry.uptick();
-                    generate_pass(name, pass, nonce, entry.get_len(),  entry.get_text_mode())
+                    generate_pass(name, &key, nonce, entry.get_len(),  entry.get_text_mode())
                 }
             };
             let old_pass = entry.get_pass(false).unwrap().to_string();
             entry.set_pass(&new_pass);
             let full_path = EncryptorType::full_path(&key, entry.get_name());
             let mut file = File::create(full_path)?;
-            save::<ServiceType>(&mut file, &key, &entry)?;
+            save(&mut file, &key, &entry)?;
             Ok((old_pass, new_pass))
         },
         Err(s) => {
@@ -183,10 +222,11 @@ pub fn upgrade(name: &str,
     }
 }
 
-pub fn delete(name: &str, pass: &str) -> Result<(), String> {
-    let key = EncryptorType::key(pass);
-    match remove_file(EncryptorType::full_path(&key, name)) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e.to_string())
+pub fn delete(name: &str, pass: &str) -> Result<(), APError> {
+    let key = load_id(pass)?.key();
+    if !exists_int(&key, name) {
+        return Err(APError::NotExist(name.to_owned()));
     }
+    remove_file(EncryptorType::full_path(&key, name))?;
+    Ok(())
 }

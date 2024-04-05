@@ -4,7 +4,7 @@ use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, Ui, Viewp
 use pass::{api::APError, gui::{
     confirmbox::{Action, ConfirmBox},
     msgbox::launch_msgbox,
-    pwdprompt::prompt_password,
+    inputprompt::prompt_input,
     validator::{textedit, LengthBounds, NotEmpty, NotInList, ValidString},
     Display,
     Windowed
@@ -15,18 +15,38 @@ use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
 fn main() -> Result<(), APError> {
     let empty = api::empty()?;
     let pwd = if empty {
-        let pwd1 = prompt_password("New master password");
+        let pwd1 = prompt_input(
+            "Password Prompt",
+            (200.0, 50.0),
+            None,
+            "New master password",
+            Box::new(()),
+            true);
         if pwd1 == "" {
             return Ok(());
         }
-        let pwd2 = prompt_password("Confirm new master password");
+        let pwd2 = prompt_input(
+            "Password Prompt",
+            (200.0, 50.0),
+            None,
+            "Confirm new master password",
+            Box::new(()),
+            true);
         if pwd1 != pwd2 {
             launch_msgbox("Passwords didn't match".to_owned(), "Mismatch".to_owned());
             return Ok(());
         }
+        let username = prompt_input(
+            "Identity Prompt",
+            (200.0, 100.0),
+            Some("One last thing: provide an identifier (username) for yourself for sharing purposes".to_owned()),
+            "Username",
+            Box::new(NotEmpty),
+            false);
+        api::init::<&str>(&username, &pwd1, &[])?;
         pwd1
     } else {
-        prompt_password("Master Password")
+        prompt_input("Password Prompt", (200.0, 50.0), None, "Master Password", Box::new(()), true)
     };
 
     if pwd != "" {

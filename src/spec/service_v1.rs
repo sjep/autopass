@@ -3,37 +3,12 @@ use std::fmt;
 
 use clipboard::ClipboardProvider;
 use clipboard::osx_clipboard::OSXClipboardContext;
-use time::{format_description, OffsetDateTime, UtcOffset};
 
 use crate::hash::TextMode;
 
 use serde::{Serialize, Deserialize};
 
 use super::Serializable;
-
-fn now() -> u64 {
-    OffsetDateTime::now_utc().unix_timestamp() as u64
-}
-
-fn timestamp_as_string(ts: u64) -> String {
-    let dtutc = OffsetDateTime::from_unix_timestamp(ts as i64)
-        .unwrap();
-    let utc = match UtcOffset::current_local_offset() {
-        Ok(offset) => {
-            dtutc.to_offset(offset);
-            false
-        }
-        Err(_e) => {
-            true
-        }
-    };
-    let mut dtstr = dtutc.format(&format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap())
-        .unwrap();
-    if utc {
-        dtstr = format!("{} UTC", dtstr);
-    }
-    dtstr
-}
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ServiceEntryV1 {
@@ -62,7 +37,7 @@ impl ServiceEntryV1 {
         for (key, val) in kvs {
             kv.insert(key.as_ref().to_owned(), val.as_ref().to_owned());
         }
-        let now = now();
+        let now = super::now();
         Self {
             pad: 0,
             name: name.to_string(),
@@ -91,7 +66,7 @@ impl ServiceEntryV1 {
         for (key, value) in kvs.iter() {
             self.kv.insert(key.to_string(), value.to_string());
         }
-        self.modify_time = now();
+        self.modify_time = super::now();
     }
 
     pub fn get_pass(&self, clipboard: bool) -> Option<&str> {
@@ -122,7 +97,7 @@ impl ServiceEntryV1 {
 
     pub fn set_pass(&mut self, pass: &str) {
         self.pass = pass.to_string();
-        self.modify_time = now();
+        self.modify_time = super::now();
     }
 
     pub fn to_string(&self) -> String {
@@ -130,11 +105,11 @@ impl ServiceEntryV1 {
     }
 
     pub fn created(&self) -> String {
-        timestamp_as_string(self.create_time)
+        super::timestamp_as_string(self.create_time)
     }
 
     pub fn modified(&self) -> String {
-        timestamp_as_string(self.modify_time)
+        super::timestamp_as_string(self.modify_time)
     }
 
 }

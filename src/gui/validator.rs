@@ -39,6 +39,12 @@ impl Validator<String> for NotEmpty {
     }
 }
 
+impl Validator<String> for () {
+    fn valid(&self, _obj: &String) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 pub struct LengthBounds {
     least: usize,
     most: usize
@@ -106,6 +112,10 @@ impl ValidString {
         &self.string
     }
 
+    pub fn to_owned(self) -> String {
+        self.string
+    }
+
     pub fn is_valid(&self) -> bool {
         self.validator.valid(&self.string).is_ok()
     }
@@ -119,6 +129,11 @@ impl ValidString {
     }
 }
 
+impl Default for ValidString {
+    fn default() -> Self {
+        Self { string: String::new(), validator: Box::new(()) }
+    }
+}
 
 pub fn textedit(ui: &mut Ui, string: &mut ValidString, additional: Option<&dyn Validator<String>>, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> Response {
     ui.scope(|ui| {

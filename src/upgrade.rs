@@ -27,13 +27,14 @@ pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: Serializable>(pass: &str
     if inprogress {
         return Err(APUpgradeError::InProgress);
     }
+
     for objname in &api::list(pass)? {
-        if try_open::<N, T>(objname, &N::key(pass)) {
+        if try_open::<N, T>(objname, &N::genkey(pass)) {
             println!("Skipping {}", objname);
             continue;
         }
-        let newkey = N::key(pass);
-        let oldkey = O::key(pass);
+        let newkey = N::genkey(pass);
+        let oldkey = O::genkey(pass);
         let newfilename = N::filename(&newkey, objname);
         let oldfilename = O::filename(&oldkey, objname);
         let newobjpath = base_path().join(&newfilename);

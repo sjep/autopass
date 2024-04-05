@@ -1,10 +1,12 @@
 use std::{fs::{read_dir, File}, io::{Read, Write}, path::{Path, PathBuf}};
 
 use serde::{Deserialize, Serialize};
+use time::{format_description, OffsetDateTime, UtcOffset};
 
 use crate::api::APError;
 
 pub mod service_v1;
+pub mod identity_v1;
 pub mod encryptor;
 
 pub const PASS_PATH: &'static str = ".pass";
@@ -21,7 +23,8 @@ pub fn base_path() -> PathBuf {
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq)]
 pub enum SpecType {
-    Service
+    Service,
+    Identity
 }
 
 pub trait Serializable: Sized {
@@ -38,6 +41,8 @@ pub trait Serializable: Sized {
     fn spec_type(&self) -> SpecType;
 }
 
+pub type APKey = [u8; 32];
+
 pub trait Encryptor: Serialize + for <'a> Deserialize<'a> {
     fn encrypt<T: Serializable>(key: &[u8], obj: &T) -> Self;
 
@@ -45,13 +50,37 @@ pub trait Encryptor: Serialize + for <'a> Deserialize<'a> {
 
     fn encrypt_version() -> u16;
 
-    fn key(pass: &str) -> Vec<u8>;
+    fn genkey(pass: &str) -> APKey;
 
     fn filename(key: &[u8], name: &str) -> String;
 
     fn full_path(key: &[u8], name: &str) -> PathBuf {
         Path::join(&base_path(), Path::new(&Self::filename(key, name)))
     }
+}
+
+fn now() -> u64 {
+    OffsetDateTime::now_utc().unix_timestamp() as u64
+}
+
+fn timestamp_as_string(ts: u64) -> String {
+    let dtutc = OffsetDateTime::from_unix_timestamp(ts as i64)
+        .unwrap();
+    let utc = match UtcOffset::current_local_offset() {
+        Ok(offset) => {
+            dtutc.to_offset(offset);
+            false
+        }
+        Err(_e) => {
+            true
+        }
+    };
+    let mut dtstr = dtutc.format(&format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap())
+        .unwrap();
+    if utc {
+        dtstr = format!("{} UTC", dtstr);
+    }
+    dtstr
 }
 
 #[derive(Serialize, Deserialize)]
@@ -117,6 +146,9 @@ pub fn list<P: AsRef<Path>>(basedir: P, by_spec: Option<SpecType>, by_version: O
     for fbuf in read_dir(dir)? {
         let filename = fbuf?;
         if filename.file_type()?.is_dir() {
+            continue;
+        }
+        if filename.path().starts_with(".") {
             continue;
         }
         let mut file = File::open(filename.path())?;

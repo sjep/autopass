@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::hash::{bin_to_str, TextMode};
 
-use super::Encryptor;
+use super::{APKey, Encryptor};
 
 
 #[derive(Serialize, Deserialize)]
@@ -42,10 +42,10 @@ impl Encryptor for Encrypt {
         T::from_binary(&plaintext)
     }
 
-    fn key(pass: &str) -> Vec<u8> {
+    fn genkey(pass: &str) -> APKey {
         let mut hasher = Sha256::default();
         hasher.update(pass.as_bytes());
-        hasher.finalize().to_vec()
+        hasher.finalize().into()
     }
 
     fn filename(key: &[u8], name: &str) -> String {

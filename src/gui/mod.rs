@@ -2,7 +2,7 @@ use egui::Ui;
 
 pub mod msgbox;
 pub mod confirmbox;
-pub mod pwdprompt;
+pub mod inputprompt;
 pub mod validator;
 
 pub trait Display<C, T> {

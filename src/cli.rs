@@ -1,4 +1,3 @@
-use std::env;
 use std::io::{stdin, stdout, Write};
 use std::str::FromStr;
 
@@ -7,9 +6,8 @@ use termion::input::TermRead;
 
 use crate::api;
 use crate::hash::TextMode;
+use crate::spec::Serializable;
 
-
-const PASS_ENV_VAR: &'static str = "AP_PWD";
 
 pub fn read_pass_raw(prompt: &str) -> String {
     let stdout = stdout();
@@ -25,24 +23,8 @@ pub fn read_pass_raw(prompt: &str) -> String {
     pass
 }
 
-
-pub fn read_pass(twice: bool) -> Option<String> {
-    if !twice {
-        if let Ok(s) = env::var(PASS_ENV_VAR) {
-            return Some(s);
-        }
-    }
-    let pass1 = read_pass_raw("password: ");
-    match twice {
-        false => Some(pass1),
-        true => {
-            let pass2 = read_pass_raw("enter again: ");
-            match pass1 == pass2 {
-                true => Some(pass1),
-                false => None
-            }
-        }
-    }
+pub fn read_pass() -> String {
+    read_pass_raw("password: ")
 }
 
 fn arg_name() -> Arg<'static, 'static> {
@@ -51,6 +33,16 @@ fn arg_name() -> Arg<'static, 'static> {
         .long("name")
         .value_name("NAME")
         .help("Service name")
+        .takes_value(true)
+        .required(true)
+}
+
+fn arg_ident() -> Arg<'static, 'static> {
+    Arg::with_name("identity")
+        .short("i")
+        .long("identity")
+        .value_name("NAME")
+        .help("Identifier for use in syncing with other users")
         .takes_value(true)
         .required(true)
 }
@@ -74,7 +66,6 @@ fn arg_set_pass() -> Arg<'static, 'static> {
                    .takes_value(true)
 }
 
-
 fn fetch_kvs<'a>(matches: &'a ArgMatches) -> Result<Vec<(&'a str, &'a str)>, &'static str> {
     let mut valid = true;
     let kvs: Vec<(&str, &str)> = match matches.values_of("kvs") {
@@ -96,15 +87,29 @@ fn fetch_kvs<'a>(matches: &'a ArgMatches) -> Result<Vec<(&'a str, &'a str)>, &'s
     }
 }
 
+fn init_cmd(matches: &ArgMatches) {
+    let pwd = read_pass_raw("password: ");
+    let pwdconfirm = read_pass_raw("re-enter password: ");
+    if pwd != pwdconfirm {
+        println!("Passwords don't match");
+        return;
+    }
+    let name = matches.value_of("name").unwrap();
+    let kvs: Vec<(&str, &str)> = match fetch_kvs(&matches) {
+        Ok(k) => k,
+        Err(s) => {
+            println!("{}", s);
+            return;
+        }
+    };
+    match api::init(name, &pwd, &kvs) {
+        Ok(res) => println!("Initialized ap with identity {}", res.name()),
+        Err(e) => println!("Error initializing ap: {}", e)
+    }
+}
 
 fn new_cmd(matches: &ArgMatches) {
-    let pass = match read_pass(true) {
-        None => {
-            println!("Passwords don't match");
-            return;
-        },
-        Some(p) => p
-    };
+    let pass = read_pass();
 
     let name = matches.value_of("name").unwrap();
     println!("Adding '{}' as new service", name);
@@ -151,9 +156,8 @@ fn new_cmd(matches: &ArgMatches) {
     };
 }
 
-
 fn get_cmd(matches: &ArgMatches) {
-    let pass = read_pass(false).unwrap();
+    let pass = read_pass();
     let name = matches.value_of("name").unwrap();
     if !api::exists(&pass, name) {
         println!("{} does not exist", name);
@@ -183,9 +187,8 @@ fn get_cmd(matches: &ArgMatches) {
     }
 }
 
-
 fn list_cmd(matches: &ArgMatches) {
-    let pass = read_pass(false).unwrap();
+    let pass = read_pass();
     if !matches.is_present("simple") {
         println!("\nServices\n--------");
     }
@@ -201,16 +204,15 @@ fn list_cmd(matches: &ArgMatches) {
     }
 }
 
-
 fn setkv_cmd(matches: &ArgMatches) {
-    let pass = read_pass(false).unwrap();
+    let pass = read_pass();
     let name = matches.value_of("name").unwrap();
     if !api::exists(&pass, name) {
         println!("{} does not exist", name);
         return;
     }
     let reset = matches.is_present("reset");
-    let pass = read_pass(false).unwrap();
+    let pass = read_pass();
     match fetch_kvs(matches) {
         Err(s) => println!("{}", s),
         Ok(kvs) => {
@@ -224,14 +226,14 @@ fn setkv_cmd(matches: &ArgMatches) {
 
 
 fn upgrade_cmd(matches: &ArgMatches) {
-    let pass = read_pass(false).unwrap();
+    let pass = read_pass();
     let name = matches.value_of("name").unwrap();
     if !api::exists(&pass, name) {
         println!("{} does not exist", name);
         return;
     }
     let set_password = matches.value_of("set-password");
-    let pass = read_pass(false).unwrap();
+    let pass = read_pass();
     match api::upgrade(name, &pass, set_password) {
         Err(s) => println!("{}", s),
         Ok((old_pass, new_pass)) => {
@@ -240,9 +242,8 @@ fn upgrade_cmd(matches: &ArgMatches) {
     };
 }
 
-
 fn delete_cmd(matches: &ArgMatches) {
-    let pass = read_pass(false).unwrap();
+    let pass = read_pass();
     let name = matches.value_of("name").unwrap();
     if !api::exists(&pass, name) {
         println!("{} does not exist", name);
@@ -252,10 +253,13 @@ fn delete_cmd(matches: &ArgMatches) {
     println!("Service {} deleted.", name);
 }
 
-
 pub fn cli() {
     let app = App::new("Auto-pass")
         .about("Auto-generate and encrypt passwords")
+        .subcommand(SubCommand::with_name("init")
+                    .about("Initialize new ap with master password")
+                    .arg(arg_ident())
+                    .arg(arg_kvs()))
         .subcommand(SubCommand::with_name("new")
                     .about("Create new service")
                     .arg(arg_name())
@@ -312,6 +316,7 @@ pub fn cli() {
         .get_matches();
 
     match app.subcommand() {
+        ("init", Some(matches)) => init_cmd(matches),
         ("new", Some(matches)) => new_cmd(matches),
         ("get", Some(matches)) => get_cmd(matches),
         ("list", Some(matches)) => list_cmd(matches),
