@@ -69,6 +69,7 @@ struct ApCtx {
     services: Vec<String>,
     refresh_service: bool,
     refresh_service_list: bool,
+    set_service: Option<Option<String>>
 }
 
 impl ApCtx {
@@ -77,7 +78,8 @@ impl ApCtx {
             masterpwd,
             services,
             refresh_service: false,
-            refresh_service_list: false
+            refresh_service_list: false,
+            set_service: None
         }
     }
 }
@@ -194,40 +196,82 @@ impl Display<ApCtx, bool> for PasswordRefresh {
     }
 }
 
+fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(ValidString, ValidString)>, is_save: bool) -> bool {
+    let mut rmnew = false;
+    let mut savekv = false;
+    match newkvp {
+        Some((key, val)) => {
+            ui.horizontal(|ui| {
+                textedit(ui, key, None, |te, _valid| te.desired_width(50.0));
+                ui.add(Label::new("="));
+                textedit(ui, val, None, |te, _valid| te.desired_width(50.0));
+
+                let msg = if is_save { "Save" } else { "Commit" };
+                let commit = Button::new(msg);
+                let enabled = key.is_valid() && val.is_valid();
+                if ui.add_enabled(enabled, commit).clicked() {
+                    savekv = true;
+                }
+                ui.scope(|ui| {
+                    ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
+                    if ui.add(Button::new("X")).clicked() {
+                        rmnew = true;
+                    }
+                });
+            });
+        }
+        None => {
+            if ui.add(Button::new("Add key/value")).clicked() {
+                *newkvp = Some((ValidString::new(Box::new(NotEmpty)), ValidString::new(Box::new(NotEmpty))));
+            }
+        }
+    }
+
+    if rmnew {
+        *newkvp = None;
+    }
+    savekv
+}
+
 struct CurrentService {
     entry: ServiceEntryV1,
     show_pass: bool,
     copied: bool,
-    newkey: ValidString,
-    newval: ValidString,
+    newkvp: Option<(ValidString, ValidString)>,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
 impl CurrentService {
-    fn new(service: &str, apctx: &ApCtx) -> Option<Self> {
-        api::get_all(service, &apctx.masterpwd).ok().map(|entry| {
-            Self {
-                entry,
-                show_pass: false,
-                copied: false,
-                newkey: ValidString::new(Box::new(NotEmpty)),
-                newval: ValidString::new(Box::new(NotEmpty)),
-                confirm: Windowed::new()
-            }
-        })
+    fn new(service: &str, apctx: &ApCtx) -> Self {
+        let entry = api::get_all(service, &apctx.masterpwd)
+            .expect("Unable to parse service entry");
+        Self {
+            entry,
+            show_pass: false,
+            copied: false,
+            newkvp: None,
+            confirm: Windowed::new()
+        }
+    }
+
+    fn refresh(&mut self, apctx: &ApCtx) {
+        let entry = api::get_all(self.entry.name(), &apctx.masterpwd)
+            .expect("Unable to parse service entry");
+        self.entry = entry;
     }
 
     fn savekvs(&mut self, apctx: &mut ApCtx) {
-        if !self.newkey.is_valid() || !self.newval.is_valid() {
-            return;
-        }
-        api::set_kvs(self.entry.name(), &apctx.masterpwd, &[(&self.newkey.string(), &self.newval.string())], false)
-            .expect("Error saving key value");
-        self.newkey = ValidString::new(Box::new(NotEmpty));
-        self.newval = ValidString::new(Box::new(NotEmpty));
+        if let Some((k, v)) = &self.newkvp {
+            if !k.is_valid() || !v.is_valid() {
+                return;
+            }
+            api::set_kvs(self.entry.name(), &apctx.masterpwd, &[(k.string(), v.string())], false)
+                .expect("Error saving key value");
+            self.newkvp = None;
 
-        self.entry = api::get_all(self.entry.name(), &apctx.masterpwd)
-            .expect("Unable to reset entry after setting kvs");
+            self.entry = api::get_all(self.entry.name(), &apctx.masterpwd)
+                .expect("Unable to reset entry after setting kvs");
+        }
     }
 }
 
@@ -299,20 +343,10 @@ impl Display<ApCtx, bool> for CurrentService {
             ));
         }
 
-        ui.horizontal(|ui| {
-            textedit(ui, &mut self.newkey, None, |te, _valid| {
-                te.desired_width(50.0)
-            });
-            ui.add(Label::new("="));
-            textedit(ui, &mut self.newval, None, |te, _valid| {
-                te.desired_width(50.0)
-            });
-            let save = Button::new("Save");
-            let enabled = self.newkey.is_valid() && self.newval.is_valid();
-            if ui.add_enabled(enabled, save).clicked() {
-                self.savekvs(apctx);
-            }
-        });
+        if display_new_kvs(ui, &mut self.newkvp, true) {
+            self.savekvs(apctx);
+        }
+
         ui.add(Separator::default());
         
         /* Service level buttons */
@@ -396,39 +430,7 @@ impl Display<ApCtx, bool> for NewService {
             self.kvs.remove(idx);
         }
 
-        let mut rmnew = false;
-        let mut savekv = false;
-        match &mut self.newkvp {
-            Some((key, val)) => {
-                ui.horizontal(|ui| {
-                    textedit(ui, key, None, |te, _valid| te.desired_width(50.0));
-                    ui.add(Label::new("="));
-                    textedit(ui, val, None, |te, _valid| te.desired_width(50.0));
-
-                    let commit = Button::new("Commit");
-                    let enabled = key.is_valid() && val.is_valid();
-                    if ui.add_enabled(enabled, commit).clicked() {
-                        savekv = true;
-                    }
-                    ui.scope(|ui| {
-                        ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
-                        if ui.add(Button::new("X")).clicked() {
-                            rmnew = true;
-                        }
-                    });
-                });
-            }
-            None => {
-                if ui.add(Button::new("Add key/value")).clicked() {
-                    self.newkvp = Some((ValidString::new(Box::new(NotEmpty)), ValidString::new(Box::new(NotEmpty))));
-                }
-            }
-        }
-
-        if rmnew {
-            self.newkvp = None;
-        }
-        if savekv {
+        if display_new_kvs(ui, &mut self.newkvp, false) {
             if let Some((k, v)) = self.newkvp.take() {
                 self.kvs.push((k.string().to_owned(), v.string().to_owned()));
             }
@@ -460,6 +462,7 @@ impl Display<ApCtx, bool> for NewService {
 struct ApApp {
     current: Option<CurrentService>,
     newservice: Windowed<NewService>,
+    confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
     ctx: ApCtx
 }
 
@@ -473,13 +476,25 @@ impl ApApp {
         Self {
             current: None,
             newservice: Windowed::new(),
+            confirm: Windowed::new(),
             ctx: ApCtx::new(pwd, services)
         }
     }
 }
 
+struct MoveTo {
+    target_service: Option<String>
+}
+
+impl Action<ApCtx> for MoveTo {
+    fn doit(&mut self, apctx: &mut ApCtx) {
+        apctx.set_service = Some(self.target_service.clone());
+    }
+}
+
 impl eframe::App for ApApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.confirm.display(ctx, &mut self.ctx);
 
         if self.ctx.refresh_service_list {
             self.ctx.services = api::list(&self.ctx.masterpwd).unwrap_or_else(|e| {
@@ -491,11 +506,15 @@ impl eframe::App for ApApp {
         }
 
         if self.ctx.refresh_service {
-            let service = self.current.as_ref().map(|se| se.entry.name());
-            if let Some(service) = service {
-                self.current = CurrentService::new(service, &self.ctx);
+            if let Some(s) = self.current.as_mut() {
+                s.refresh(&self.ctx);
             }
             self.ctx.refresh_service = false;
+        }
+
+        if let Some(ns) = &self.ctx.set_service {
+            self.current = ns.as_ref().map(|s| CurrentService::new(s, &self.ctx));
+            self.ctx.set_service = None;
         }
 
         self.newservice.display(ctx, &mut self.ctx);
@@ -520,11 +539,27 @@ impl eframe::App for ApApp {
                         }).unwrap_or(false);
                         let resp = ui.add(SelectableLabel::new(selected, service));
                         if resp.clicked() {
-                            self.current = if self.current.is_none() || self.current.as_ref().unwrap().entry.get_name() != service {
-                                CurrentService::new(service, &self.ctx)
+                            let target_service = if self.current.is_none() || self.current.as_ref().unwrap().entry.get_name() != service {
+                                Some(service.to_owned())
                             } else {
                                 None
                             };
+                            match &self.current {
+                                Some(CurrentService{newkvp: Some((nk, nv)), ..}) => {
+                                    if nk.string().len() == 0 && nv.string().len() == 0 {
+                                        self.current = target_service.map(|s| CurrentService::new(&s, &self.ctx));
+                                    } else {
+                                        self.confirm.set(
+                                            "Lose unsaved key/value".to_owned(),
+                                            Box::new(ConfirmBox::new(
+                                                format!("Are you sure you want to discard unsaved key/value {} = {}?", nk.string(), nv.string()),
+                                                MoveTo { target_service }
+                                            ))
+                                        )
+                                    }
+                                }
+                                _ => self.current = target_service.map(|s| CurrentService::new(&s, &self.ctx))
+                            }
                         }
                     }
                 });
