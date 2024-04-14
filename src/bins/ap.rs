@@ -68,7 +68,6 @@ struct ApCtx {
     refresh_service: bool,
     refresh_service_list: bool,
     set_service: Option<Option<Current>>, // First optional: are we setting anything, second optional: what we're setting to
-    confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
 impl ApCtx {
@@ -80,7 +79,6 @@ impl ApCtx {
             refresh_service: false,
             refresh_service_list: false,
             set_service: None,
-            confirm: Windowed::new()
         }
     }
 }
@@ -132,6 +130,7 @@ impl Action<ApCtx> for Box<KvDelete> {
         }.unwrap_or_else(|e| {
             panic!("Unable to retrieve kvs: {}", e);
         });
+        apctx.refresh_service = true;
     }
 }
 
@@ -248,7 +247,7 @@ fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(ValidString, ValidString)>,
     savekv
 }
 
-fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(&String, &String)], apctx: &mut ApCtx) {
+fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(&String, &String)], confirm: &mut Windowed<Box<dyn Display<ApCtx, bool>>>) {
     let mut delkey = None;
 
     for (key, value) in kvs {
@@ -266,7 +265,7 @@ fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(&String, &String)], a
         });
     }
     if let Some(key) = delkey {
-        apctx.confirm.set(
+        confirm.set(
             "Delete key/value pair".to_owned(),
             Box::new(ConfirmBox::new(
                 format!("Are you sure you want to delete {}?", key),
@@ -279,6 +278,7 @@ fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(&String, &String)], a
 struct CurrentId {
     entry: IdentityV1,
     newkvp: Option<(ValidString, ValidString)>,
+    confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
 impl CurrentId {
@@ -288,6 +288,7 @@ impl CurrentId {
         Self {
             entry,
             newkvp: None,
+            confirm: Windowed::new()
         }
     }
 
@@ -335,7 +336,7 @@ impl Display<ApCtx, bool> for CurrentId {
         kvs.sort();
 
         ui.add(Separator::default());
-        display_kvs(ui, None, &kvs, apctx);
+        display_kvs(ui, None, &kvs, &mut self.confirm);
 
         if display_new_kvs(ui, &mut self.newkvp, true) {
             self.savekvs(apctx);
@@ -371,6 +372,7 @@ impl CurrentService {
         let entry = api::get_all(self.entry.name(), &apctx.masterpwd)
             .expect("Unable to parse service entry");
         self.entry = entry;
+        self.show_pass = false;
         self.copied = false;
     }
 
@@ -444,7 +446,7 @@ impl Display<ApCtx, bool> for CurrentService {
         kvs.sort();
 
         ui.add(Separator::default());
-        display_kvs(ui, Some(self.entry.name()), &kvs, apctx);
+        display_kvs(ui, Some(self.entry.name()), &kvs, &mut self.confirm);
 
         if display_new_kvs(ui, &mut self.newkvp, true) {
             self.savekvs(apctx);
