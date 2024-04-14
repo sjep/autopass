@@ -4,7 +4,7 @@ use std::str::FromStr;
 use clap::{Arg, App, SubCommand, ArgMatches};
 use termion::input::TermRead;
 
-use crate::api;
+use crate::api::{self, get_id};
 use crate::hash::TextMode;
 use crate::spec::Serializable;
 
@@ -156,6 +156,15 @@ fn new_cmd(matches: &ArgMatches) {
     };
 }
 
+fn get_id_cmd(_matches: &ArgMatches) {
+    let pass = read_pass();
+
+    match api::get_id(&pass) {
+        Ok(id) => println!("{}", id),
+        Err(s) => println!("Error getting id info: {}", s)
+    }
+}
+
 fn get_cmd(matches: &ArgMatches) {
     let pass = read_pass();
     let name = matches.value_of("name").unwrap();
@@ -212,7 +221,6 @@ fn setkv_cmd(matches: &ArgMatches) {
         return;
     }
     let reset = matches.is_present("reset");
-    let pass = read_pass();
     match fetch_kvs(matches) {
         Err(s) => println!("{}", s),
         Ok(kvs) => {
@@ -224,6 +232,19 @@ fn setkv_cmd(matches: &ArgMatches) {
     };
 }
 
+fn setkv_id_cmd(matches: &ArgMatches) {
+    let pass = read_pass();
+    let reset = matches.is_present("reset");
+    match fetch_kvs(matches) {
+        Err(s) => println!("{}", s),
+        Ok(kvs) => {
+            match api::set_kvs_id(&pass, &kvs, reset) {
+                Err(s) => println!("{}", s),
+                _ => {}
+            }
+        }
+    };
+}
 
 fn upgrade_cmd(matches: &ArgMatches) {
     let pass = read_pass();
@@ -288,6 +309,8 @@ pub fn cli() {
                          .long("all")
                          .help("Print everything about the service"))
                     .display_order(20))
+        .subcommand(SubCommand::with_name("get-id")
+                    .about("Get generic information not associated with a particular service"))
         .subcommand(SubCommand::with_name("list")
                     .about("List services unlocked by password")
                     .display_order(0)
@@ -297,6 +320,15 @@ pub fn cli() {
         .subcommand(SubCommand::with_name("set-kv")
                     .about("Set key value pairs for a service")
                     .arg(arg_name())
+                    .arg(arg_kvs())
+                    .arg(Arg::with_name("reset")
+                         .short("r")
+                         .long("reset")
+                         .takes_value(false)
+                         .help("Clear all existing values"))
+                    .display_order(50))
+        .subcommand(SubCommand::with_name("set-kv-id")
+                    .about("Set generic key value pairs not associated with a particular service")
                     .arg(arg_kvs())
                     .arg(Arg::with_name("reset")
                          .short("r")
@@ -319,8 +351,10 @@ pub fn cli() {
         ("init", Some(matches)) => init_cmd(matches),
         ("new", Some(matches)) => new_cmd(matches),
         ("get", Some(matches)) => get_cmd(matches),
+        ("get-id", Some(matches)) => get_id_cmd(matches),
         ("list", Some(matches)) => list_cmd(matches),
         ("set-kv", Some(matches)) => setkv_cmd(matches),
+        ("set-kv-id", Some(matches)) => setkv_id_cmd(matches),
         ("upgrade", Some(matches)) => upgrade_cmd(matches),
         ("delete", Some(matches)) => delete_cmd(matches),
         _ => {

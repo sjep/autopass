@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::{Path, PathBuf}};
+use std::{collections::HashMap, fmt, path::{Path, PathBuf}};
 
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +41,28 @@ impl IdentityV1 {
     pub fn key(&self) -> APKey {
         self.key.clone()
     }
+
+    pub fn get_kvs(&self) -> &HashMap<String, String> {
+        &self.kv
+    }
+
+    pub fn set_kvs(&mut self, kvs: &[(&str, &str)], reset: bool) {
+        if reset {
+            self.kv.clear();
+        }
+        for (key, value) in kvs.iter() {
+            self.kv.insert(key.to_string(), value.to_string());
+        }
+        self.modify_time = super::now();
+    }
+
+    pub fn created(&self) -> String {
+        super::timestamp_as_string(self.create_time)
+    }
+
+    pub fn modified(&self) -> String {
+        super::timestamp_as_string(self.modify_time)
+    }
 }
 
 impl Serializable for IdentityV1 {
@@ -69,5 +91,18 @@ impl Serializable for IdentityV1 {
 
     fn spec_type(&self) -> SpecType {
         SpecType::Identity
+    }
+}
+
+impl fmt::Display for IdentityV1 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut kvs = String::new();
+        for (key, value) in self.kv.iter() {
+            kvs = format!("{}  {}: {}\n", kvs, key, value);
+        }
+        let created = format!("Created: {}", self.created());
+        let modified = format!("Modified: {}", self.modified());
+
+        f.write_str(&format!("Name: {}\n{}\n{}\nKey value pairs:\n{}", self.name, created, modified, kvs))
     }
 }

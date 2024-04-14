@@ -1,14 +1,11 @@
 
-use egui::{Button, Color32, Label, Layout, SelectableLabel, Separator, Ui, ViewportBuilder};
+use std::collections::HashMap;
+
+use egui::{Button, Color32, Label, Layout, RichText, SelectableLabel, Separator, Ui, ViewportBuilder};
 
 use pass::{api::APError, gui::{
-    confirmbox::{Action, ConfirmBox},
-    msgbox::launch_msgbox,
-    inputprompt::prompt_input,
-    validator::{textedit, LengthBounds, NotEmpty, NotInList, ValidString},
-    Display,
-    Windowed
-}};
+    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, validator::{textedit, LengthBounds, NotEmpty, NotInList, ValidString}, Display, Windowed
+}, spec::identity_v1::IdentityV1};
 use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
 
 
@@ -65,21 +62,25 @@ fn launch_ap(pwd: String) {
 }
 
 struct ApCtx {
+    username: String,
     masterpwd: String,
     services: Vec<String>,
     refresh_service: bool,
     refresh_service_list: bool,
-    set_service: Option<Option<String>>
+    set_service: Option<Option<Current>>, // First optional: are we setting anything, second optional: what we're setting to
+    confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
 impl ApCtx {
-    fn new(masterpwd: String, services: Vec<String>) -> Self {
+    fn new(username: String, masterpwd: String, services: Vec<String>) -> Self {
         Self {
+            username,
             masterpwd,
             services,
             refresh_service: false,
             refresh_service_list: false,
-            set_service: None
+            set_service: None,
+            confirm: Windowed::new()
         }
     }
 }
@@ -99,24 +100,38 @@ impl Action<ApCtx> for Box<DeleteService> {
 }
 
 struct KvDelete {
-    service: String,
+    service: Option<String>, // None for id kv delete
     key: String
+}
+
+impl KvDelete {
+    fn save(&self, existing: &HashMap<String, String>, apctx: &mut ApCtx) {
+        let mut kvs = vec![];
+        for (key, value) in existing {
+            if key != &self.key {
+                kvs.push((key.as_str(), value.as_str()));
+            }
+        }
+
+        match &self.service {
+            Some(s) => api::set_kvs(s, &apctx.masterpwd, &kvs, true),
+            None => api::set_kvs_id(&apctx.masterpwd, &kvs, true)
+        }.unwrap_or_else(|e| {
+            panic!("Failed to save kvs: {}", e);
+        })
+    }
 }
 
 impl Action<ApCtx> for Box<KvDelete> {
     fn doit(&mut self, apctx: &mut ApCtx) {
-        if let Ok(entry) = api::get_all(&self.service, &apctx.masterpwd) {
-            let mut kvs = vec![];
-            for (key, value) in entry.get_kvs() {
-                if key != &self.key {
-                    kvs.push((key.as_str(), value.as_str()));
-                }
-            }
-            if let Err(e) = api::set_kvs(&self.service, &apctx.masterpwd, &kvs, true) {
-                eprintln!("Failed to save kvs for service {}: {}", self.service, e);
-            }
-            apctx.refresh_service = true;
-        }
+        match &self.service {
+            Some(s) => api::get_all(s, &apctx.masterpwd)
+                .map(|s| self.save(s.get_kvs(), apctx)),
+            None => api::get_id(&apctx.masterpwd)
+                .map(|id| self.save(id.get_kvs(), apctx))
+        }.unwrap_or_else(|e| {
+            panic!("Unable to retrieve kvs: {}", e);
+        });
     }
 }
 
@@ -233,6 +248,104 @@ fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(ValidString, ValidString)>,
     savekv
 }
 
+fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(&String, &String)], apctx: &mut ApCtx) {
+    let mut delkey = None;
+
+    for (key, value) in kvs {
+        ui.horizontal(|ui| {
+            ui.add(Label::new(*key));
+            ui.add(Label::new("="));
+            ui.add(Label::new(*value)
+                .truncate(true));
+            ui.scope(|ui| {
+                ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
+                if ui.add(Button::new("X")).clicked() {
+                    delkey = Some(key.to_owned());
+                }
+            });
+        });
+    }
+    if let Some(key) = delkey {
+        apctx.confirm.set(
+            "Delete key/value pair".to_owned(),
+            Box::new(ConfirmBox::new(
+                format!("Are you sure you want to delete {}?", key),
+                Box::new(KvDelete { service: service.map(|s| s.to_owned()), key: key.to_owned() })
+            )
+        ));
+    }
+}
+
+struct CurrentId {
+    entry: IdentityV1,
+    newkvp: Option<(ValidString, ValidString)>,
+}
+
+impl CurrentId {
+    fn new(apctx: &ApCtx) -> Self {
+        let entry = api::get_id(&apctx.masterpwd)
+            .expect("Unable to parse id entry");
+        Self {
+            entry,
+            newkvp: None,
+        }
+    }
+
+    fn refresh(&mut self, apctx: &ApCtx) {
+        let entry = api::get_id(&apctx.masterpwd)
+            .expect("Unable to parse id entry");
+        self.entry = entry;
+    }
+
+    fn savekvs(&mut self, apctx: &mut ApCtx) {
+        if let Some((k, v)) = &self.newkvp {
+            if !k.is_valid() || !v.is_valid() {
+                return;
+            }
+            api::set_kvs_id(&apctx.masterpwd, &[(k.string(), v.string())], false)
+                .expect("Error saving key value");
+            self.newkvp = None;
+
+            self.refresh(apctx);
+        }
+    }
+
+    fn dirty_msg(&self) -> Option<String> {
+        match &self.newkvp {
+            Some((nk, nv)) => {
+                if nk.string().len() == 0 && nv.string().len() == 0 {
+                    None
+                } else {
+                    Some(format!("Are you sure you want to discard unsaved key/value {} = {}?", nk.string(), nv.string()))
+                }
+            }
+            _ => None
+        }
+    }
+}
+
+impl Display<ApCtx, bool> for CurrentId {
+    fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
+        ui.add(Label::new(format!("Username: {}", self.entry.name())));
+        ui.add(Label::new(format!("Created: {}", self.entry.created())));
+        ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
+
+        /* Kvs section */
+        let mut kvs = self.entry.get_kvs().iter().collect::<Vec<(&String, &String)>>();
+        kvs.sort();
+
+        ui.add(Separator::default());
+        display_kvs(ui, None, &kvs, apctx);
+
+        if display_new_kvs(ui, &mut self.newkvp, true) {
+            self.savekvs(apctx);
+        }
+
+        ui.add(Separator::default());
+        true
+    }
+}
+
 struct CurrentService {
     entry: ServiceEntryV1,
     show_pass: bool,
@@ -258,6 +371,7 @@ impl CurrentService {
         let entry = api::get_all(self.entry.name(), &apctx.masterpwd)
             .expect("Unable to parse service entry");
         self.entry = entry;
+        self.copied = false;
     }
 
     fn savekvs(&mut self, apctx: &mut ApCtx) {
@@ -269,8 +383,20 @@ impl CurrentService {
                 .expect("Error saving key value");
             self.newkvp = None;
 
-            self.entry = api::get_all(self.entry.name(), &apctx.masterpwd)
-                .expect("Unable to reset entry after setting kvs");
+            self.refresh(apctx);
+        }
+    }
+
+    fn dirty_msg(&self) -> Option<String> {
+        match &self.newkvp {
+            Some((nk, nv)) => {
+                if nk.string().len() == 0 && nv.string().len() == 0 {
+                    None
+                } else {
+                    Some(format!("Are you sure you want to discard unsaved key/value {} = {}?", nk.string(), nv.string()))
+                }
+            }
+            _ => None
         }
     }
 }
@@ -314,34 +440,11 @@ impl Display<ApCtx, bool> for CurrentService {
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
         /* Kvs section */
-        let mut delkey = None;
         let mut kvs = self.entry.get_kvs().iter().collect::<Vec<(&String, &String)>>();
         kvs.sort();
 
         ui.add(Separator::default());
-        for (key, value) in kvs {
-            ui.horizontal(|ui| {
-                ui.add(Label::new(key));
-                ui.add(Label::new("="));
-                ui.add(Label::new(value)
-                    .truncate(true));
-                ui.scope(|ui| {
-                    ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
-                    if ui.add(Button::new("X")).clicked() {
-                        delkey = Some(key.to_owned());
-                    }
-                });
-            });
-        }
-        if let Some(key) = delkey {
-            self.confirm.set(
-                "Delete key/value pair".to_owned(),
-                Box::new(ConfirmBox::new(
-                    format!("Are you sure you want to delete {}?", key),
-                    Box::new(KvDelete { service: self.entry.name().to_owned(), key })
-                )
-            ));
-        }
+        display_kvs(ui, Some(self.entry.name()), &kvs, apctx);
 
         if display_new_kvs(ui, &mut self.newkvp, true) {
             self.savekvs(apctx);
@@ -459,8 +562,63 @@ impl Display<ApCtx, bool> for NewService {
     }
 }
 
+enum Current {
+    Id(CurrentId),
+    Service(CurrentService)
+}
+
+impl Current {
+    fn refresh(&mut self, apctx: &ApCtx) {
+        match self {
+            Self::Id(i) => i.refresh(apctx),
+            Self::Service(s) => s.refresh(apctx)
+        }
+    }
+
+    fn is_service(&self, service: &str) -> bool {
+        if let Self::Service(s) = self {
+            s.entry.name() == service
+        } else {
+            false
+        }
+    }
+
+    fn is_id(&self) -> bool {
+        match self {
+            Self::Id(_) => true,
+            _ => false
+        }
+    }
+
+    fn dirty_msg(&self) -> Option<String> {
+        match self {
+            Self::Service(s) => s.dirty_msg(),
+            Self::Id(id) => id.dirty_msg()
+        }
+    }
+}
+
+impl Display<ApCtx, bool> for Current {
+    fn display(&mut self, ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
+        match self {
+            Current::Id(c) => c.display(ctx, ui, apctx),
+            Current::Service(s) => s.display(ctx, ui, apctx)
+        }
+    }
+}
+
+struct MoveTo {
+    target: Option<Current>
+}
+
+impl Action<ApCtx> for MoveTo {
+    fn doit(&mut self, apctx: &mut ApCtx) {
+        apctx.set_service = Some(self.target.take());
+    }
+}
+
 struct ApApp {
-    current: Option<CurrentService>,
+    current: Option<Current>,
     newservice: Windowed<NewService>,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
     ctx: ApCtx
@@ -468,27 +626,35 @@ struct ApApp {
 
 impl ApApp {
     fn new(pwd: String) -> Self {
+        let username = api::get_id(&pwd).unwrap_or_else(|e| {
+            panic!("Unable to parse identity file: {}", e);
+        }).name().to_owned();
         let services: Vec<String> = api::list(&pwd).unwrap_or_else(|e| {
-            eprintln!("Error listing entries: {}", e);
-            vec![]
+            panic!("Error listing entries: {}", e);
         });
 
         Self {
             current: None,
             newservice: Windowed::new(),
             confirm: Windowed::new(),
-            ctx: ApCtx::new(pwd, services)
+            ctx: ApCtx::new(username, pwd, services)
         }
     }
-}
 
-struct MoveTo {
-    target_service: Option<String>
-}
-
-impl Action<ApCtx> for MoveTo {
-    fn doit(&mut self, apctx: &mut ApCtx) {
-        apctx.set_service = Some(self.target_service.clone());
+    fn set_current(&mut self, target: Option<Current>) {
+        /* Reset the service to none if you reclick on the same service */
+        if let Some(msg) = self.current
+            .as_ref()
+            .map(|c| c.dirty_msg())
+            .flatten()
+        {
+            self.confirm.set(
+                "Lose unsaved information".to_owned(),
+                Box::new(ConfirmBox::new(msg, MoveTo { target }))
+            )
+        } else {
+            self.current = target;
+        }
     }
 }
 
@@ -512,9 +678,8 @@ impl eframe::App for ApApp {
             self.ctx.refresh_service = false;
         }
 
-        if let Some(ns) = &self.ctx.set_service {
-            self.current = ns.as_ref().map(|s| CurrentService::new(s, &self.ctx));
-            self.ctx.set_service = None;
+        if let Some(ns) = self.ctx.set_service.take() {
+            self.current = ns;
         }
 
         self.newservice.display(ctx, &mut self.ctx);
@@ -533,34 +698,33 @@ impl eframe::App for ApApp {
                 });
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    let mut selected = None;
+
+                    let is_selected = self.current.as_ref().map(|c| c.is_id()).unwrap_or(false);
+                    if ui.add(SelectableLabel::new(is_selected, RichText::new(&self.ctx.username).strong())).clicked() {
+                        let target = if self.current.is_none() || !self.current.as_ref().unwrap().is_id() {
+                            Some(Current::Id(CurrentId::new(&self.ctx)))
+                        } else {
+                            None
+                        };
+                        selected = Some(target);
+                    }
+
+                    ui.add(Separator::default());
+
                     for service in self.ctx.services.iter() {
-                        let selected = self.current.as_ref().map(|se| {
-                            se.entry.get_name() == service
-                        }).unwrap_or(false);
-                        let resp = ui.add(SelectableLabel::new(selected, service));
-                        if resp.clicked() {
-                            let target_service = if self.current.is_none() || self.current.as_ref().unwrap().entry.get_name() != service {
-                                Some(service.to_owned())
+                        let is_selected = self.current.as_ref().map(|c| c.is_service(&service)).unwrap_or(false);
+                        if ui.add(SelectableLabel::new(is_selected, service)).clicked() {
+                            let target = if self.current.is_none() || !self.current.as_ref().unwrap().is_service(service) {
+                                Some(Current::Service(CurrentService::new(service, &self.ctx)))
                             } else {
                                 None
                             };
-                            match &self.current {
-                                Some(CurrentService{newkvp: Some((nk, nv)), ..}) => {
-                                    if nk.string().len() == 0 && nv.string().len() == 0 {
-                                        self.current = target_service.map(|s| CurrentService::new(&s, &self.ctx));
-                                    } else {
-                                        self.confirm.set(
-                                            "Lose unsaved key/value".to_owned(),
-                                            Box::new(ConfirmBox::new(
-                                                format!("Are you sure you want to discard unsaved key/value {} = {}?", nk.string(), nv.string()),
-                                                MoveTo { target_service }
-                                            ))
-                                        )
-                                    }
-                                }
-                                _ => self.current = target_service.map(|s| CurrentService::new(&s, &self.ctx))
-                            }
+                            selected = Some(target);
                         }
+                    }
+                    if let Some(target) = selected {
+                        self.set_current(target);
                     }
                 });
         });

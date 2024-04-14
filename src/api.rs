@@ -104,8 +104,8 @@ pub fn init<T: AsRef<str>>(
 
     std::fs::create_dir_all(base_path())?;
 
-    let mut file = File::create(idpath)?;
     let id = IdentityType::new(name, &key, kvs);
+    let mut file = File::create(idpath)?;
     save(&mut file, &key, &id)?;
     Ok(id)
 }
@@ -228,5 +228,23 @@ pub fn delete(name: &str, pass: &str) -> Result<(), APError> {
         return Err(APError::NotExist(name.to_owned()));
     }
     remove_file(EncryptorType::full_path(&key, name))?;
+    Ok(())
+}
+
+pub fn get_id(pass: &str) -> Result<IdentityType, APError> {
+    load_id(pass)
+}
+
+pub fn set_kvs_id(
+    pass: &str,
+    kvs: &[(&str, &str)],
+    reset: bool) -> Result<(), APError>
+{
+    let mut id = load_id(&pass)?;
+    id.set_kvs(kvs, reset);
+    let idpath = identity_path(base_path());
+    let key = EncryptorType::genkey(pass);
+    let mut file = File::create(idpath)?;
+    save(&mut file, &key, &id)?;
     Ok(())
 }
