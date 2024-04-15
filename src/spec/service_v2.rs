@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 
 use clipboard::ClipboardProvider;
@@ -8,42 +7,51 @@ use crate::hash::TextMode;
 
 use serde::{Serialize, Deserialize};
 
-use super::Serializable;
+use super::{Serializable, SERVICE_MAGIC};
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct ServiceEntryV1 {
-    pub(super) pad: u16,
+pub struct ServiceEntryV2 {
+    pub(super) magic: u32,
     pub(super) name: String,
     pub(super) pass: String,
     pub(super) nonce: u8,
-    pub(super) kv: HashMap<String, String>,
+    pub(super) kv: Vec<(String, String)>,
+    pub(super) tags: Vec<String>,
     pub(super) len: u8,
     pub(super) text_mode: TextMode,
     pub(super) create_time: u64,
     pub(super) modify_time: u64
 }
 
-impl ServiceEntryV1 {
+impl ServiceEntryV2 {
 
     pub fn new<T: AsRef<str>>(
         name: &str,
         pass: &str,
         nonce: u8,
         kvs: &[(T, T)],
+        tgs: &[T],
         len: u8,
         text_mode: &TextMode) -> Self
     {
-        let mut kv: HashMap<String, String> = HashMap::new();
+        let mut kv = vec![];
         for (key, val) in kvs {
-            kv.insert(key.as_ref().to_owned(), val.as_ref().to_owned());
+            kv.push((key.as_ref().to_owned(), val.as_ref().to_owned()));
         }
+        kv.sort();
+        let mut tags = vec![];
+        for tag in tgs {
+            tags.push(tag.as_ref().to_owned());
+        }
+        tags.sort();
         let now = super::now();
         Self {
-            pad: 0,
+            magic: SERVICE_MAGIC,
             name: name.to_string(),
             pass: pass.to_string(),
             nonce,
             kv,
+            tags,
             len,
             text_mode: text_mode.clone(),
             create_time: now,
@@ -55,7 +63,7 @@ impl ServiceEntryV1 {
         &self.name
     }
 
-    pub fn get_kvs(&self) -> &HashMap<String, String> {
+    pub fn get_kvs(&self) -> &[(String, String)] {
         &self.kv
     }
 
@@ -63,9 +71,25 @@ impl ServiceEntryV1 {
         if reset {
             self.kv.clear();
         }
-        for (key, value) in kvs.iter() {
-            self.kv.insert(key.to_string(), value.to_string());
+        for (key, value) in kvs {
+            self.kv.push((key.to_string(), value.to_string()));
         }
+        self.kv.sort();
+        self.modify_time = super::now();
+    }
+
+    pub fn get_tags(&self) -> &[String] {
+        &self.tags
+    }
+
+    pub fn set_tags(&mut self, tags: &[&str], reset: bool) {
+        if reset {
+            self.tags.clear();
+        }
+        for tag in tags {
+            self.tags.push(tag.to_string());
+        }
+        self.tags.sort();
         self.modify_time = super::now();
     }
 
@@ -117,12 +141,12 @@ impl ServiceEntryV1 {
     }
 
     pub fn version() -> u16 {
-        1
+        2
     }
 
 }
 
-impl Serializable for ServiceEntryV1 {
+impl Serializable for ServiceEntryV2 {
     fn to_binary(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
@@ -139,7 +163,7 @@ impl Serializable for ServiceEntryV1 {
     }
 
     fn sanity_check(&self) -> bool {
-        self.pad == 0
+        self.magic == SERVICE_MAGIC
     }
 
     fn version(&self) -> u16 {
@@ -151,7 +175,7 @@ impl Serializable for ServiceEntryV1 {
     }
 }
 
-impl fmt::Display for ServiceEntryV1 {
+impl fmt::Display for ServiceEntryV2 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut kvs = String::new();
         for (key, value) in self.kv.iter() {

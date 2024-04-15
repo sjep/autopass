@@ -4,7 +4,7 @@ use std::str::FromStr;
 use clap::{Arg, App, SubCommand, ArgMatches};
 use termion::input::TermRead;
 
-use crate::api::{self, get_id};
+use crate::api;
 use crate::hash::TextMode;
 use crate::spec::Serializable;
 
@@ -148,9 +148,14 @@ fn new_cmd(matches: &ArgMatches) {
         }
     };
 
+    let tags = match matches.values_of("kvs") {
+        None => vec![],
+        Some(vs) => vs.collect::<Vec<&str>>()
+    };
+
     let set_password = matches.value_of("set-password");
 
-    match api::new(name, &pass, &text_mode, len, &kvs, set_password)  {
+    match api::new(name, &pass, &text_mode, len, &kvs, &tags, set_password)  {
         Ok(entry) => println!("New password created for service '{}':\n{}", name, entry.get_pass(false).unwrap()),
         Err(s) => println!("Error creating service: {}", s)
     };
@@ -296,6 +301,11 @@ pub fn cli() {
                          .help("New password's length")
                          .default_value("16"))
                     .arg(arg_kvs())
+                    .arg(Arg::with_name("tags")
+                         .short("t")
+                         .help("Tags for this service")
+                         .multiple(true)
+                         .number_of_values(1))
                     .arg(arg_set_pass())
                     .display_order(10))
         .subcommand(SubCommand::with_name("get")

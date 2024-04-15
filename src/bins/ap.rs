@@ -1,12 +1,10 @@
 
-use std::collections::HashMap;
-
 use egui::{Button, Color32, Label, Layout, RichText, SelectableLabel, Separator, Ui, ViewportBuilder};
 
 use pass::{api::APError, gui::{
     confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, validator::{textedit, LengthBounds, NotEmpty, NotInList, ValidString}, Display, Windowed
-}, spec::identity_v1::IdentityV1};
-use pass::{api, spec::{service_v1::ServiceEntryV1, Serializable}};
+}, spec::{IdentityType, ServiceType}};
+use pass::{api, spec::Serializable};
 
 
 fn main() -> Result<(), APError> {
@@ -103,7 +101,7 @@ struct KvDelete {
 }
 
 impl KvDelete {
-    fn save(&self, existing: &HashMap<String, String>, apctx: &mut ApCtx) {
+    fn save(&self, existing: &[(String, String)], apctx: &mut ApCtx) {
         let mut kvs = vec![];
         for (key, value) in existing {
             if key != &self.key {
@@ -247,14 +245,14 @@ fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(ValidString, ValidString)>,
     savekv
 }
 
-fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(&String, &String)], confirm: &mut Windowed<Box<dyn Display<ApCtx, bool>>>) {
+fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(String, String)], confirm: &mut Windowed<Box<dyn Display<ApCtx, bool>>>) {
     let mut delkey = None;
 
     for (key, value) in kvs {
         ui.horizontal(|ui| {
-            ui.add(Label::new(*key));
+            ui.add(Label::new(key));
             ui.add(Label::new("="));
-            ui.add(Label::new(*value)
+            ui.add(Label::new(value)
                 .truncate(true));
             ui.scope(|ui| {
                 ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
@@ -276,7 +274,7 @@ fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(&String, &String)], c
 }
 
 struct CurrentId {
-    entry: IdentityV1,
+    entry: IdentityType,
     newkvp: Option<(ValidString, ValidString)>,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
@@ -332,8 +330,7 @@ impl Display<ApCtx, bool> for CurrentId {
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
         /* Kvs section */
-        let mut kvs = self.entry.get_kvs().iter().collect::<Vec<(&String, &String)>>();
-        kvs.sort();
+        let mut kvs = self.entry.get_kvs();
 
         ui.add(Separator::default());
         display_kvs(ui, None, &kvs, &mut self.confirm);
@@ -348,7 +345,7 @@ impl Display<ApCtx, bool> for CurrentId {
 }
 
 struct CurrentService {
-    entry: ServiceEntryV1,
+    entry: ServiceType,
     show_pass: bool,
     copied: bool,
     newkvp: Option<(ValidString, ValidString)>,
@@ -442,8 +439,7 @@ impl Display<ApCtx, bool> for CurrentService {
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
         /* Kvs section */
-        let mut kvs = self.entry.get_kvs().iter().collect::<Vec<(&String, &String)>>();
-        kvs.sort();
+        let mut kvs = self.entry.get_kvs();
 
         ui.add(Separator::default());
         display_kvs(ui, Some(self.entry.name()), &kvs, &mut self.confirm);
@@ -493,6 +489,7 @@ impl NewService {
             &pass::hash::TextMode::NoWhiteSpace,
             16,
             &self.kvs,
+            &[],
             self.password.as_ref().map(|vs| vs.string())
         ) {
             eprintln!("Error saving new service {}: {}", self.name.string(), e);

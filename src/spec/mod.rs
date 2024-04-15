@@ -6,19 +6,30 @@ use time::{format_description, OffsetDateTime, UtcOffset};
 use crate::api::APError;
 
 pub mod service_v1;
+pub mod service_v2;
 pub mod identity_v1;
+pub mod identity_v2;
 pub mod encryptor;
 
 pub const PASS_PATH: &'static str = ".pass";
 pub const PASS_BASE_ENVVAR: &'static str = "AP_BASEDIR";
+const IDENTITY_MAGIC: u32 = 0xfedb1234;
+const SERVICE_MAGIC: u32 = 0x83596235;
+const IDENTITY_FNAME: &str = ".apid";
 
-type EncryptorType = crate::spec::encryptor::Encrypt;
+pub type EncryptorType = crate::spec::encryptor::Encrypt;
+pub type IdentityType = identity_v2::IdentityV2;
+pub type ServiceType = service_v2::ServiceEntryV2;
 
 pub fn base_path() -> PathBuf {
     if let Ok(basepath) = std::env::var(PASS_BASE_ENVVAR) {
         return basepath.into();
     }
     Path::join(&dirs::home_dir().unwrap(), Path::new(PASS_PATH))
+}
+
+pub fn identity_path<P: AsRef<Path>>(basedir: P) -> PathBuf {
+    Path::join(basedir.as_ref(), IDENTITY_FNAME)
 }
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq)]
@@ -83,11 +94,11 @@ fn timestamp_as_string(ts: u64) -> String {
     dtstr
 }
 
-#[derive(Serialize, Deserialize)]
-struct Header {
-    spec_type: SpecType,
-    spec_version: u16,
-    encrypt_version: u16
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Header {
+    pub spec_type: SpecType,
+    pub spec_version: u16,
+    pub encrypt_version: u16
 }
 
 const HEADER_SIZE: usize = 8;
@@ -103,22 +114,28 @@ impl Header {
 }
 
 pub fn save<T: Serializable>(file: &mut File, key: &[u8], service: &T) -> Result<(), APError> {
+    assert!(file.metadata()?.len() == 0);
     let encrypted = EncryptorType::encrypt(key, service);
     let header = Header::create::<T, EncryptorType>(service);
     let headerdata = bincode::serialize(&header)?;
     assert!(headerdata.len() == HEADER_SIZE);
     let data = bincode::serialize(&encrypted)?;
-    file.write_all(&headerdata)?;
-    file.write_all(&data)?;
+    file.write_all(&headerdata).unwrap();
+    file.write_all(&data).unwrap();
     Ok(())
 }
 
-pub fn load<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8]) -> Result<T, APError> {
-
-    let mut data = vec![];
-    file.read_to_end(&mut data)?;
+pub fn load_header(file: &mut File) -> Result<Header, APError> {
+    let mut data = [0u8; 8];
+    file.read_exact(&mut data).unwrap();
     let header = bincode::deserialize::<Header>(&data[0..HEADER_SIZE])?;
+    Ok(header)
+}
 
+pub fn load<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8]) -> Result<T, APError> {
+    let mut data = vec![];
+    file.read_to_end(&mut data).unwrap();
+    let header = bincode::deserialize::<Header>(&data[0..HEADER_SIZE])?;
     if header.encrypt_version != E::encrypt_version() {
         return Err(APError::WrongEncryptVersion(E::encrypt_version(), header.encrypt_version));
     }
@@ -167,4 +184,44 @@ pub fn list<P: AsRef<Path>>(basedir: P, by_spec: Option<SpecType>, by_version: O
         entries.push(filename.path());
     }
     Ok(entries)
+}
+
+impl From<self::identity_v1::IdentityV1> for self::identity_v2::IdentityV2 {
+    fn from(value: self::identity_v1::IdentityV1) -> Self {
+        let mut kv = vec![];
+        for (k, v) in value.kv {
+            kv.push((k, v));
+        }
+        kv.sort();
+        Self {
+            magic: value.magic,
+            name: value.name,
+            key: value.key,
+            kv,
+            create_time: value.create_time,
+            modify_time: value.modify_time,
+        }
+    }
+}
+
+impl From<self::service_v1::ServiceEntryV1> for self::service_v2::ServiceEntryV2 {
+    fn from(value: self::service_v1::ServiceEntryV1) -> Self {
+        let mut kv = vec![];
+        for (k, v) in value.kv {
+            kv.push((k, v));
+        }
+        kv.sort();
+        Self {
+            magic: SERVICE_MAGIC,
+            name: value.name,
+            pass: value.pass,
+            nonce: value.nonce,
+            kv,
+            tags: Vec::new(),
+            len: value.len,
+            text_mode: value.text_mode,
+            create_time: value.create_time,
+            modify_time: value.modify_time,
+        }
+    }
 }

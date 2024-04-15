@@ -1,26 +1,27 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
 use super::{APKey, Serializable, SpecType, IDENTITY_MAGIC};
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct IdentityV1 {
+pub struct IdentityV2 {
     pub(super) magic: u32,
     pub(super) name: String,
     pub(super) key: APKey,
-    pub(super) kv: HashMap<String, String>,
+    pub(super) kv: Vec<(String, String)>,
     pub(super) create_time: u64,
     pub(super) modify_time: u64
 }
 
-impl IdentityV1 {
+impl IdentityV2 {
     pub fn new<T: AsRef<str>>(name: &str, key: &APKey, kvs: &[(T, T)]) -> Self {
         let now = super::now();
-        let mut kv: HashMap<String, String> = HashMap::new();
+        let mut kv = vec![];
         for (key, val) in kvs {
-            kv.insert(key.as_ref().to_owned(), val.as_ref().to_owned());
+            kv.push((key.as_ref().to_owned(), val.as_ref().to_owned()));
         }
+        kv.sort();
         Self {
             magic: IDENTITY_MAGIC,
             name: name.to_owned(),
@@ -35,7 +36,7 @@ impl IdentityV1 {
         self.key.clone()
     }
 
-    pub fn get_kvs(&self) -> &HashMap<String, String> {
+    pub fn get_kvs(&self) -> &[(String, String)] {
         &self.kv
     }
 
@@ -44,8 +45,9 @@ impl IdentityV1 {
             self.kv.clear();
         }
         for (key, value) in kvs.iter() {
-            self.kv.insert(key.to_string(), value.to_string());
+            self.kv.push((key.to_string(), value.to_string()));
         }
+        self.kv.sort();
         self.modify_time = super::now();
     }
 
@@ -58,7 +60,7 @@ impl IdentityV1 {
     }
 
     pub fn version() -> u16 {
-        1
+        2
     }
 
     pub fn spec_type() -> SpecType {
@@ -66,7 +68,7 @@ impl IdentityV1 {
     }
 }
 
-impl Serializable for IdentityV1 {
+impl Serializable for IdentityV2 {
     fn name(&self) -> &str {
         &self.name
     }
@@ -95,7 +97,7 @@ impl Serializable for IdentityV1 {
     }
 }
 
-impl fmt::Display for IdentityV1 {
+impl fmt::Display for IdentityV2 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut kvs = String::new();
         for (key, value) in self.kv.iter() {

@@ -3,9 +3,9 @@ use std::fs::{File, read_dir, remove_file};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::spec::identity_v1::identity_path;
-use crate::spec::{base_path, load, save, APKey, Encryptor, Serializable, SpecType};
+use crate::spec::{base_path, identity_path, load, load_header, save, APKey, Encryptor, EncryptorType, IdentityType, Serializable, ServiceType, SpecType};
 use crate::hash::{bin_to_str, TextMode};
+use crate::upgrade::check_upgrade;
 
 
 
@@ -29,11 +29,11 @@ pub enum APError {
     PasswordIncorrect,
     #[error("Wrong encryptionversion, wanted {0} but got {1}")]
     WrongEncryptVersion(u16, u16),
+    #[error("Wrong spec type, wanted {0:?} but got {1:?}")]
+    WrongSpecType(SpecType, SpecType),
+    #[error("Spec version too old")]
+    VersionTooOld
 }
-
-type ServiceType = crate::spec::service_v1::ServiceEntryV1;
-type IdentityType = crate::spec::identity_v1::IdentityV1;
-type EncryptorType = crate::spec::encryptor::Encrypt;
 
 
 fn exists_int(key: &[u8], name: &str) -> bool {
@@ -71,7 +71,13 @@ fn load_id(pass: &str) -> Result<IdentityType, APError> {
         return Err(APError::NotInited);
     }
 
-    let mut file = File::open(idpath)?;
+    let mut file = File::open(&idpath)?;
+    let header = load_header(&mut file)?;
+    if header.spec_type != IdentityType::spec_type() {
+        return Err(APError::WrongSpecType(IdentityType::spec_type(), header.spec_type));
+    }
+    check_upgrade::<EncryptorType>(&idpath, &key)?;
+    let mut file = File::open(&idpath)?;
     let id = load::<IdentityType, EncryptorType>(&mut file, &key)?;
     if !id.sanity_check() {
         return Err(APError::PasswordIncorrect);
@@ -86,9 +92,18 @@ fn load_entry(name: &str, pass: &str) -> Result<(ServiceType, APKey), APError> {
     }
 
     let filename = EncryptorType::full_path(&key, name);
-    let mut file = File::open(filename)?;
-
-    Ok((load::<ServiceType, EncryptorType>(&mut file, &key)?, key))
+    let mut file = File::open(&filename)?;
+    let header = load_header(&mut file)?;
+    if header.spec_type != ServiceType::spec_type() {
+        return Err(APError::WrongSpecType(ServiceType::spec_type(), header.spec_type));
+    }
+    check_upgrade::<EncryptorType>(&filename, &key)?;
+    let mut file = File::open(&filename)?;
+    let entry = load::<ServiceType, EncryptorType>(&mut file, &key)?;
+    if !entry.sanity_check() {
+        return Err(APError::PasswordIncorrect);
+    }
+    Ok((entry, key))
 }
 
 pub fn init<T: AsRef<str>>(
@@ -116,6 +131,7 @@ pub fn new<T: AsRef<str>>(
     text_mode: &TextMode,
     len: u8,
     kvs: &[(T, T)],
+    tags: &[T],
     service_pass: Option<&str>) -> Result<ServiceType, APError>
 {
     let key = load_id(pass)?.key();
@@ -134,6 +150,7 @@ pub fn new<T: AsRef<str>>(
         &password,
         0u8,
         kvs,
+        tags,
         len,
         text_mode
     );
@@ -188,6 +205,7 @@ pub fn list(pass: &str) -> Result<Vec<String>, APError> {
 
     let mut names: Vec<String> = vec![];
     for filename in &crate::spec::list(&dir, Some(SpecType::Service), None)? {
+        check_upgrade::<EncryptorType>(filename, &key)?;
         let mut file = File::open(filename)?;
         let entry = load::<ServiceType, EncryptorType>(&mut file, &key)?;
         names.push(entry.get_name().to_string());
