@@ -1,0 +1,6 @@
+{
+    "rust-analyzer.linkedProjects": [],
+    "rust-analyzer.cargo.features": [
+        "clap", "cli", "gui"
+    ]
+}

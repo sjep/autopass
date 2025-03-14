@@ -449,6 +449,10 @@ impl Display<ApCtx, bool> for CurrentService {
         }
 
         ui.add(Separator::default());
+
+        
+
+        ui.add(Separator::default());
         
         /* Service level buttons */
         ui.horizontal(|ui| {
@@ -628,7 +632,7 @@ impl ApApp {
         let username = api::get_id(&pwd).unwrap_or_else(|e| {
             panic!("Unable to parse identity file: {}", e);
         }).name().to_owned();
-        let services: Vec<String> = api::list(&pwd).unwrap_or_else(|e| {
+        let services: Vec<String> = api::list(&pwd, &[]).unwrap_or_else(|e| {
             panic!("Error listing entries: {}", e);
         });
 
@@ -662,7 +666,7 @@ impl eframe::App for ApApp {
         self.confirm.display(ctx, &mut self.ctx);
 
         if self.ctx.refresh_service_list {
-            self.ctx.services = api::list(&self.ctx.masterpwd).unwrap_or_else(|e| {
+            self.ctx.services = api::list(&self.ctx.masterpwd, &[]).unwrap_or_else(|e| {
                 eprintln!("Error listing entries: {}", e);
                 vec![]
             });

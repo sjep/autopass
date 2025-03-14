@@ -17,6 +17,7 @@ const IDENTITY_MAGIC: u32 = 0xfedb1234;
 const SERVICE_MAGIC: u32 = 0x83596235;
 const IDENTITY_FNAME: &str = ".apid";
 
+pub const VERSION: u32 = 2;
 pub type EncryptorType = crate::spec::encryptor::Encrypt;
 pub type IdentityType = identity_v2::IdentityV2;
 pub type ServiceType = service_v2::ServiceEntryV2;

@@ -3,6 +3,7 @@ use std::fs::{File, read_dir, remove_file};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::spec::service_v2::ServiceEntryV2;
 use crate::spec::{base_path, identity_path, load, load_header, save, APKey, Encryptor, EncryptorType, IdentityType, Serializable, ServiceType, SpecType};
 use crate::hash::{bin_to_str, TextMode};
 use crate::upgrade::check_upgrade;
@@ -189,6 +190,19 @@ pub fn set_kvs(name: &str,
     Ok(())
 }
 
+pub fn set_tags(name: &str,
+                pass: &str,
+                tags: &[&str],
+                reset: bool) -> Result<(), APError> {
+
+    let (mut entry, key) = load_entry(&name, &pass)?;
+    entry.set_tags(tags, reset);
+    let full_path = EncryptorType::full_path(&key, entry.get_name());
+    let mut file = File::create(full_path)?;
+    save(&mut file, &key, &entry)?;
+    Ok(())
+}
+
 pub fn empty() -> Result<bool, APError> {
     let dir = base_path();
     if !dir.exists() {
@@ -199,16 +213,23 @@ pub fn empty() -> Result<bool, APError> {
         .is_none())
 }
 
-pub fn list(pass: &str) -> Result<Vec<String>, APError> {
+fn has_tags(service_tags: &[String], tags: &[String]) -> bool {
+    tags.iter().fold(true, |valid, t| valid && service_tags.contains(t))
+}
+
+pub fn list(pass: &str, tags: &[&str]) -> Result<Vec<String>, APError> {
     let dir = base_path();
     let key = load_id(pass)?.key();
+    let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
 
     let mut names: Vec<String> = vec![];
     for filename in &crate::spec::list(&dir, Some(SpecType::Service), None)? {
         check_upgrade::<EncryptorType>(filename, &key)?;
         let mut file = File::open(filename)?;
         let entry = load::<ServiceType, EncryptorType>(&mut file, &key)?;
-        names.push(entry.get_name().to_string());
+        if has_tags(&entry.get_tags(), &tags) {
+            names.push(entry.get_name().to_string());
+        }
     }
     names.sort();
     Ok(names)
@@ -265,4 +286,29 @@ pub fn set_kvs_id(
     let mut file = File::create(idpath)?;
     save(&mut file, &key, &id)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_tag_filter() {
+        assert!(has_tags(&[], &[]));
+
+        let service_tags = vec!["TAG1".to_owned(), "TAG2".to_owned()];
+        assert!(has_tags(&service_tags, &[]));
+
+        let service_tags = vec!["TAG1".to_owned(), "TAG2".to_owned()];
+        assert!(has_tags(&service_tags, &["TAG1".to_owned()]));
+
+        let service_tags = vec!["TAG1".to_owned(), "TAG2".to_owned()];
+        assert!(has_tags(&service_tags, &service_tags));
+
+        let service_tags = vec!["TAG1".to_owned(), "TAG2".to_owned()];
+        assert!(!has_tags(&service_tags, &["TAG3".to_owned()]));
+
+        assert!(!has_tags(&[], &["TAG3".to_owned()]));
+    }
 }

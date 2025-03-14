@@ -184,7 +184,9 @@ impl fmt::Display for ServiceEntryV2 {
         let created = format!("Created: {}", self.created());
         let modified = format!("Modified: {}", self.modified());
 
-        f.write_str(&format!("Name: {}\nPass: {}\n{}\n{}\nKey value pairs:\n{}", self.name, self.pass, created, modified, kvs))
+        let tags = self.tags.join("\n  ");
+
+        f.write_str(&format!("Name: {}\nPass: {}\n{}\n{}\nKey value pairs:\n{}Tags:\n  {}", self.name, self.pass, created, modified, kvs, tags))
     }
 }
 

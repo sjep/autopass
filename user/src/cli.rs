@@ -6,7 +6,7 @@ use termion::input::TermRead;
 
 use crate::api;
 use crate::hash::TextMode;
-use crate::spec::Serializable;
+use crate::spec::{Serializable, VERSION};
 
 
 pub fn read_pass_raw(prompt: &str) -> String {
@@ -55,6 +55,13 @@ fn arg_kvs() -> Arg<'static, 'static> {
          .help("Key-value pairs to be stored of the form -k KEY=VALUE")
          .multiple(true)
          .number_of_values(1)
+}
+
+fn arg_tags() -> Arg<'static, 'static> {
+    Arg::with_name("tags")
+        .help("Tag the service with keywords for grouping")
+        .multiple(true)
+        .number_of_values(1)
 }
 
 
@@ -206,7 +213,8 @@ fn list_cmd(matches: &ArgMatches) {
     if !matches.is_present("simple") {
         println!("\nServices\n--------");
     }
-    match api::list(&pass) {
+    let tags = matches.values_of("tags").map(|v| v.collect()).unwrap_or(vec![]);
+    match api::list(&pass, &tags) {
         Ok(items) => {
             for n in items {
                 println!("{}", n);
@@ -230,7 +238,7 @@ fn setkv_cmd(matches: &ArgMatches) {
         Err(s) => println!("{}", s),
         Ok(kvs) => {
             match api::set_kvs(name, &pass, &kvs, reset) {
-                Err(s) => println!("{}", s),
+                Err(s) => println!("Error saving kvs for service {}: {}", name, s),
                 _ => {}
             }
         }
@@ -244,11 +252,24 @@ fn setkv_id_cmd(matches: &ArgMatches) {
         Err(s) => println!("{}", s),
         Ok(kvs) => {
             match api::set_kvs_id(&pass, &kvs, reset) {
-                Err(s) => println!("{}", s),
+                Err(s) => println!("Error saving kvs to id: {}", s),
                 _ => {}
             }
         }
     };
+}
+
+fn set_tags(matches: &ArgMatches) {
+    let name = matches.value_of("name").unwrap();
+    let pass = read_pass();
+    let reset = matches.is_present("reset");
+    if let Some(tags) = matches.values_of("tags") {
+        let tags = tags.collect::<Vec<&str>>();
+        match api::set_tags(name, &pass, &tags, reset) {
+            Err(s) => println!("Error saving tags for service {}: {}", name, s),
+            _ => {}
+        }
+    }
 }
 
 fn upgrade_cmd(matches: &ArgMatches) {
@@ -282,6 +303,7 @@ fn delete_cmd(matches: &ArgMatches) {
 pub fn cli() {
     let app = App::new("Auto-pass")
         .about("Auto-generate and encrypt passwords")
+        .version(&*crate::spec::VERSION.to_string())
         .subcommand(SubCommand::with_name("init")
                     .about("Initialize new ap with master password")
                     .arg(arg_ident())
@@ -326,7 +348,12 @@ pub fn cli() {
                     .display_order(0)
                     .arg(Arg::with_name("simple")
                         .short("s")
-                        .help("Simple output")))
+                        .help("Simple output"))
+                    .arg(Arg::with_name("tags")
+                        .short("t")
+                        .help("Filter services by these tags")
+                        .multiple(true)
+                        .number_of_values(1)))
         .subcommand(SubCommand::with_name("set-kv")
                     .about("Set key value pairs for a service")
                     .arg(arg_name())
@@ -345,6 +372,16 @@ pub fn cli() {
                          .long("reset")
                          .takes_value(false)
                          .help("Clear all existing values"))
+                    .display_order(50))
+        .subcommand(SubCommand::with_name("set-tags")
+                    .about("Set tags for the service")
+                    .arg(arg_name())
+                    .arg(arg_tags())
+                    .arg(Arg::with_name("reset")
+                        .short("r")
+                        .long("reset")
+                        .takes_value(false)
+                        .help("Clear all existing values"))
                     .display_order(50))
         .subcommand(SubCommand::with_name("upgrade")
                     .about("Upgrade password")
@@ -365,8 +402,10 @@ pub fn cli() {
         ("list", Some(matches)) => list_cmd(matches),
         ("set-kv", Some(matches)) => setkv_cmd(matches),
         ("set-kv-id", Some(matches)) => setkv_id_cmd(matches),
+        ("set-tags", Some(matches)) => set_tags(matches),
         ("upgrade", Some(matches)) => upgrade_cmd(matches),
         ("delete", Some(matches)) => delete_cmd(matches),
+        
         _ => {
             println!("{}", app.usage());
         }

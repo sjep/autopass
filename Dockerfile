@@ -1,9 +1,9 @@
-FROM ubuntu:22.04 
+FROM alpine:latest
 
-RUN apt update && apt install -y curl
+RUN apk update && apk add build-base curl
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /rustup-init.sh && \
-    bash /rustup-init.sh -y && \
+    sh /rustup-init.sh -y && \
     rm /rustup-init.sh && \
     . /root/.cargo/env && \
     rustup default nightly
