@@ -82,12 +82,12 @@ impl ServiceEntryV2 {
         &self.tags
     }
 
-    pub fn set_tags(&mut self, tags: &[&str], reset: bool) {
+    pub fn set_tags<S: AsRef<str>>(&mut self, tags: &[S], reset: bool) {
         if reset {
             self.tags.clear();
         }
         for tag in tags {
-            self.tags.push(tag.to_string());
+            self.tags.push(tag.as_ref().to_string());
         }
         self.tags.sort();
         self.modify_time = super::now();

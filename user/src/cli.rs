@@ -98,20 +98,20 @@ fn init_cmd(matches: &ArgMatches) {
     let pwd = read_pass_raw("password: ");
     let pwdconfirm = read_pass_raw("re-enter password: ");
     if pwd != pwdconfirm {
-        println!("Passwords don't match");
+        eprintln!("Passwords don't match");
         return;
     }
     let name = matches.value_of("name").unwrap();
     let kvs: Vec<(&str, &str)> = match fetch_kvs(&matches) {
         Ok(k) => k,
         Err(s) => {
-            println!("{}", s);
+            eprintln!("{}", s);
             return;
         }
     };
     match api::init(name, &pwd, &kvs) {
         Ok(res) => println!("Initialized ap with identity {}", res.name()),
-        Err(e) => println!("Error initializing ap: {}", e)
+        Err(e) => eprintln!("Error initializing ap: {}", e)
     }
 }
 
@@ -134,13 +134,13 @@ fn new_cmd(matches: &ArgMatches) {
 
     let len: u8 = match usize::from_str(matches.value_of("length").unwrap()) {
         Err(_) => {
-            println!("Length provided not an integer");
+            eprintln!("Length provided not an integer");
             return;
         },
         Ok(l) => {
             match l > 256 {
                 true => {
-                    println!("Max length allowed is 256");
+                    eprintln!("Max length allowed is 256");
                     return;
                 },
                 false => l as u8
@@ -164,7 +164,7 @@ fn new_cmd(matches: &ArgMatches) {
 
     match api::new(name, &pass, &text_mode, len, &kvs, &tags, set_password)  {
         Ok(entry) => println!("New password created for service '{}':\n{}", name, entry.get_pass(false).unwrap()),
-        Err(s) => println!("Error creating service: {}", s)
+        Err(s) => eprintln!("Error creating service: {}", s)
     };
 }
 
@@ -173,7 +173,7 @@ fn get_id_cmd(_matches: &ArgMatches) {
 
     match api::get_id(&pass) {
         Ok(id) => println!("{}", id),
-        Err(s) => println!("Error getting id info: {}", s)
+        Err(s) => eprintln!("Error getting id info: {}", s)
     }
 }
 
@@ -196,13 +196,13 @@ fn get_cmd(matches: &ArgMatches) {
                     Some(p) => println!("{}", p),
                     None => println!("Copied to clipboard")
                 },
-                Err(s) => println!("Error getting service: {}", s)
+                Err(s) => eprintln!("Error getting service: {}", s)
             }
         },
         true => {
             match api::get_all(name, &pass) {
                 Ok(entry) => println!("{}", entry),
-                Err(s) => println!("Error getting service: {}", s)
+                Err(s) => eprintln!("Error getting service: {}", s)
             }
         }
     }
@@ -221,7 +221,24 @@ fn list_cmd(matches: &ArgMatches) {
             }
         }
         Err(e) => {
-            println!("Error listing services: {}", e);
+            eprintln!("Error listing services: {}", e);
+        }
+    }
+}
+
+fn list_tags(matches: &ArgMatches) {
+    let pass = read_pass();
+    if !matches.is_present("simple") {
+        println!("\nTags\n--------");
+    }
+    match api::list_tags(&pass) {
+        Ok(items) => {
+            for n in items {
+                println!("{}", n);
+            }
+        }
+        Err(e) => {
+            eprintln!("Error listing tags: {}", e);
         }
     }
 }
@@ -230,7 +247,7 @@ fn setkv_cmd(matches: &ArgMatches) {
     let pass = read_pass();
     let name = matches.value_of("name").unwrap();
     if !api::exists(&pass, name) {
-        println!("{} does not exist", name);
+        eprintln!("{} does not exist", name);
         return;
     }
     let reset = matches.is_present("reset");
@@ -238,7 +255,7 @@ fn setkv_cmd(matches: &ArgMatches) {
         Err(s) => println!("{}", s),
         Ok(kvs) => {
             match api::set_kvs(name, &pass, &kvs, reset) {
-                Err(s) => println!("Error saving kvs for service {}: {}", name, s),
+                Err(s) => eprintln!("Error saving kvs for service {}: {}", name, s),
                 _ => {}
             }
         }
@@ -252,7 +269,7 @@ fn setkv_id_cmd(matches: &ArgMatches) {
         Err(s) => println!("{}", s),
         Ok(kvs) => {
             match api::set_kvs_id(&pass, &kvs, reset) {
-                Err(s) => println!("Error saving kvs to id: {}", s),
+                Err(s) => eprintln!("Error saving kvs to id: {}", s),
                 _ => {}
             }
         }
@@ -266,7 +283,7 @@ fn set_tags(matches: &ArgMatches) {
     if let Some(tags) = matches.values_of("tags") {
         let tags = tags.collect::<Vec<&str>>();
         match api::set_tags(name, &pass, &tags, reset) {
-            Err(s) => println!("Error saving tags for service {}: {}", name, s),
+            Err(s) => eprintln!("Error saving tags for service {}: {}", name, s),
             _ => {}
         }
     }
@@ -276,7 +293,7 @@ fn upgrade_cmd(matches: &ArgMatches) {
     let pass = read_pass();
     let name = matches.value_of("name").unwrap();
     if !api::exists(&pass, name) {
-        println!("{} does not exist", name);
+        eprintln!("{} does not exist", name);
         return;
     }
     let set_password = matches.value_of("set-password");
@@ -293,7 +310,7 @@ fn delete_cmd(matches: &ArgMatches) {
     let pass = read_pass();
     let name = matches.value_of("name").unwrap();
     if !api::exists(&pass, name) {
-        println!("{} does not exist", name);
+        eprintln!("{} does not exist", name);
         return;
     }
     api::delete(&pass, name).unwrap();
@@ -354,6 +371,12 @@ pub fn cli() {
                         .help("Filter services by these tags")
                         .multiple(true)
                         .number_of_values(1)))
+        .subcommand(SubCommand::with_name("list-tags")
+                    .about("List all tags in the list of services")
+                    .display_order(0)
+                    .arg(Arg::with_name("simple")
+                        .short("s")
+                        .help("Simple output")))
         .subcommand(SubCommand::with_name("set-kv")
                     .about("Set key value pairs for a service")
                     .arg(arg_name())
@@ -400,6 +423,7 @@ pub fn cli() {
         ("get", Some(matches)) => get_cmd(matches),
         ("get-id", Some(matches)) => get_id_cmd(matches),
         ("list", Some(matches)) => list_cmd(matches),
+        ("list-tags", Some(matches)) => list_tags(matches),
         ("set-kv", Some(matches)) => setkv_cmd(matches),
         ("set-kv-id", Some(matches)) => setkv_id_cmd(matches),
         ("set-tags", Some(matches)) => set_tags(matches),

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::{File, read_dir, remove_file};
 
 use sha2::{Digest, Sha256};
@@ -190,10 +191,10 @@ pub fn set_kvs(name: &str,
     Ok(())
 }
 
-pub fn set_tags(name: &str,
-                pass: &str,
-                tags: &[&str],
-                reset: bool) -> Result<(), APError> {
+pub fn set_tags<S: AsRef<str>>(name: &str,
+                               pass: &str,
+                               tags: &[S],
+                               reset: bool) -> Result<(), APError> {
 
     let (mut entry, key) = load_entry(&name, &pass)?;
     entry.set_tags(tags, reset);
@@ -233,6 +234,24 @@ pub fn list(pass: &str, tags: &[&str]) -> Result<Vec<String>, APError> {
     }
     names.sort();
     Ok(names)
+}
+
+pub fn list_tags(pass: &str) -> Result<Vec<String>, APError> {
+    let dir = base_path();
+    let key = load_id(pass)?.key();
+
+    let mut tags = HashSet::new();
+    for filename in &crate::spec::list(&dir, Some(SpecType::Service), None)? {
+        check_upgrade::<EncryptorType>(filename, &key)?;
+        let mut file = File::open(filename)?;
+        let entry = load::<ServiceType, EncryptorType>(&mut file, &key)?;
+        for tag in entry.get_tags() {
+            tags.insert(tag.to_owned());
+        }
+    }
+    let mut tagvec: Vec<_> = tags.drain().collect();
+    tagvec.sort();
+    Ok(tagvec)
 }
 
 pub fn upgrade(name: &str,

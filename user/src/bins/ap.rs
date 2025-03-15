@@ -132,6 +132,33 @@ impl Action<ApCtx> for Box<KvDelete> {
     }
 }
 
+struct TagDelete {
+    service: String,
+    tag_to_remove: String
+}
+
+impl TagDelete {
+    fn save(&self, apctx: &mut ApCtx) -> Result<(), APError> {
+        let s = api::get_all(&self.service, &apctx.masterpwd)?;
+        let mut tags = vec![];
+        for t in s.get_tags() {
+            if *t != self.tag_to_remove {
+                tags.push(t);
+            }
+        }
+        api::set_tags(&self.service, &apctx.masterpwd, &tags, true)
+    }
+}
+
+impl Action<ApCtx> for Box<TagDelete> {
+    fn doit(&mut self, apctx: &mut ApCtx) {
+        if let Err(e) = self.save(apctx) {
+            panic!("Unable to remove tag from service {}: {}", self.service, e);
+        }
+        apctx.refresh_service = true;
+    }
+}
+
 fn newpwdprompt(ui: &mut Ui, password: &mut Option<ValidString>) {
     ui.horizontal(|ui| {
         match password {
@@ -330,7 +357,7 @@ impl Display<ApCtx, bool> for CurrentId {
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
         /* Kvs section */
-        let mut kvs = self.entry.get_kvs();
+        let kvs = self.entry.get_kvs();
 
         ui.add(Separator::default());
         display_kvs(ui, None, &kvs, &mut self.confirm);
@@ -439,7 +466,7 @@ impl Display<ApCtx, bool> for CurrentService {
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
         /* Kvs section */
-        let mut kvs = self.entry.get_kvs();
+        let kvs = self.entry.get_kvs();
 
         ui.add(Separator::default());
         display_kvs(ui, Some(self.entry.name()), &kvs, &mut self.confirm);
@@ -450,7 +477,20 @@ impl Display<ApCtx, bool> for CurrentService {
 
         ui.add(Separator::default());
 
-        
+        ui.horizontal(|ui| {
+            for tag in self.entry.get_tags() {
+                let resp = ui.add(Button::new(tag));
+                if resp.clicked() {
+                    self.confirm.set(
+                        "Delete Tag".to_owned(), 
+                        Box::new(ConfirmBox::new(
+                            format!("Are you sure you want to delete tag {} from {}?", tag, self.entry.name()),
+                            Box::new(TagDelete { service: self.entry.name().to_owned(), tag_to_remove: tag.to_owned() })
+                        ))
+                    );
+                }
+            }
+        });
 
         ui.add(Separator::default());
         
