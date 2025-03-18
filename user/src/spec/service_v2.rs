@@ -189,4 +189,3 @@ impl fmt::Display for ServiceEntryV2 {
         f.write_str(&format!("Name: {}\nPass: {}\n{}\n{}\nKey value pairs:\n{}Tags:\n  {}", self.name, self.pass, created, modified, kvs, tags))
     }
 }
-

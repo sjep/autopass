@@ -13,8 +13,8 @@ termion = { version = "1.5.5", optional = true }
 dirs = "2.0.2"
 rand = "0.7.3"
 time = { version = "0.3.34", features = ["formatting", "local-offset"] }
-egui = { version = "0.26", optional = true }
-eframe = { version = "0.26", optional = true }
+egui = { version = "0.31", optional = true }
+eframe = { version = "0.31", optional = true }
 aes-gcm = "0.10.3"
 sha2 = "0.10"
 thiserror = "1"

@@ -219,21 +219,26 @@ fn has_tags(service_tags: &[String], tags: &[String]) -> bool {
 }
 
 pub fn list(pass: &str, tags: &[&str]) -> Result<Vec<String>, APError> {
+    Ok(list_all(pass, tags)?.iter().map(|s| s.name().to_owned()).collect())
+}
+
+pub fn list_all(pass: &str, tags: &[&str]) -> Result<Vec<ServiceType>, APError> {
     let dir = base_path();
     let key = load_id(pass)?.key();
     let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
 
-    let mut names: Vec<String> = vec![];
+    let mut services: Vec<ServiceType> = vec![];
     for filename in &crate::spec::list(&dir, Some(SpecType::Service), None)? {
         check_upgrade::<EncryptorType>(filename, &key)?;
         let mut file = File::open(filename)?;
         let entry = load::<ServiceType, EncryptorType>(&mut file, &key)?;
         if has_tags(&entry.get_tags(), &tags) {
-            names.push(entry.get_name().to_string());
+            services.push(entry);
         }
     }
-    names.sort();
-    Ok(names)
+    services.sort_by(|s1, s2| s1.name().cmp(s2.name()));
+    Ok(services)
+
 }
 
 pub fn list_tags(pass: &str) -> Result<Vec<String>, APError> {

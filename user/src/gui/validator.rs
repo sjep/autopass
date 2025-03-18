@@ -135,20 +135,21 @@ impl Default for ValidString {
     }
 }
 
-pub fn textedit(ui: &mut Ui, string: &mut ValidString, additional: Option<&dyn Validator<String>>, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> Response {
-    ui.scope(|ui| {
+pub fn textedit(ui: &mut Ui, string: &mut ValidString, additional: Option<&dyn Validator<String>>, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> (Response, bool) {
+    let resp = ui.scope(|ui| {
         match string.check(additional) {
             Ok(()) => {
                 let textedit = TextEdit::singleline(string.string_mut());
                 let textedit = modify_textedit(textedit, true);
-                ui.add(textedit)
+                (ui.add(textedit), true)
             }
             Err(msg) => {
                 ui.visuals_mut().extreme_bg_color = ERR_COLOR;
                 let textedit = TextEdit::singleline(string.string_mut());
                 let textedit = modify_textedit(textedit, false);
-                ui.add(textedit).on_hover_text(msg)
+                (ui.add(textedit).on_hover_text(msg), false)
             }
         }
-    }).inner
+    });
+    resp.inner
 }

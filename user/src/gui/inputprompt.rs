@@ -14,7 +14,7 @@ pub fn prompt_input(app_name: &str, size: (f32, f32), label: Option<String>, hin
     let state = InputState { label, hint: hint.to_owned(), input: ValidString::new(validation), is_password };
     let state = Rc::new(RefCell::new(state));
     let cstate = state.clone();
-    eframe::run_native(app_name, native_options, Box::new(|_cc| Box::new(InputPrompt{state: cstate})))
+    eframe::run_native(app_name, native_options, Box::new(|_cc| Ok(Box::new(InputPrompt{state: cstate}))))
         .unwrap();
     state.take().input.to_owned()
 }
@@ -42,13 +42,13 @@ impl eframe::App for InputPrompt {
             }
             let hint = state.hint.clone();
             let is_password = state.is_password;
-            let response = textedit(ui, &mut state.input, None, |te, _| {
+            let (response, valid) = textedit(ui, &mut state.input, None, |te, _| {
                 te
                     .password(is_password)
                     .hint_text(&hint)
             });
             if response.lost_focus()
-                && state.input.is_valid()
+                && valid
                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
             {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);

@@ -56,7 +56,7 @@ fn launch_ap(pwd: String) {
     let mut native_options = eframe::NativeOptions::default();
     native_options.viewport = viewport;
 
-    eframe::run_native("AutoPass", native_options, Box::new(|_cc| Box::new(ApApp::new(pwd)))).unwrap();
+    eframe::run_native("AutoPass", native_options, Box::new(|_cc| Ok(Box::new(ApApp::new(pwd))))).unwrap();
 }
 
 struct ApCtx {
@@ -65,6 +65,7 @@ struct ApCtx {
     services: Vec<String>,
     refresh_service: bool,
     refresh_service_list: bool,
+    refresh_tags: bool,
     set_service: Option<Option<Current>>, // First optional: are we setting anything, second optional: what we're setting to
 }
 
@@ -76,6 +77,7 @@ impl ApCtx {
             services,
             refresh_service: false,
             refresh_service_list: false,
+            refresh_tags: false,
             set_service: None,
         }
     }
@@ -156,6 +158,7 @@ impl Action<ApCtx> for Box<TagDelete> {
             panic!("Unable to remove tag from service {}: {}", self.service, e);
         }
         apctx.refresh_service = true;
+        apctx.refresh_tags = true;
     }
 }
 
@@ -241,14 +244,13 @@ fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(ValidString, ValidString)>,
     match newkvp {
         Some((key, val)) => {
             ui.horizontal(|ui| {
-                textedit(ui, key, None, |te, _valid| te.desired_width(50.0));
+                let (_, key_valid) = textedit(ui, key, None, |te, _valid| te.desired_width(50.0));
                 ui.add(Label::new("="));
-                textedit(ui, val, None, |te, _valid| te.desired_width(50.0));
+                let (_, val_valid) = textedit(ui, val, None, |te, _valid| te.desired_width(50.0));
 
                 let msg = if is_save { "Save" } else { "Commit" };
                 let commit = Button::new(msg);
-                let enabled = key.is_valid() && val.is_valid();
-                if ui.add_enabled(enabled, commit).clicked() {
+                if ui.add_enabled(key_valid && val_valid, commit).clicked() {
                     savekv = true;
                 }
                 ui.scope(|ui| {
@@ -280,7 +282,7 @@ fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(String, String)], con
             ui.add(Label::new(key));
             ui.add(Label::new("="));
             ui.add(Label::new(value)
-                .truncate(true));
+                .truncate());
             ui.scope(|ui| {
                 ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
                 if ui.add(Button::new("X")).clicked() {
@@ -376,6 +378,7 @@ struct CurrentService {
     show_pass: bool,
     copied: bool,
     newkvp: Option<(ValidString, ValidString)>,
+    newtag: ValidString,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
@@ -388,6 +391,7 @@ impl CurrentService {
             show_pass: false,
             copied: false,
             newkvp: None,
+            newtag: ValidString::new(Box::new(NotEmpty{})),
             confirm: Windowed::new()
         }
     }
@@ -411,6 +415,18 @@ impl CurrentService {
 
             self.refresh(apctx);
         }
+    }
+
+    fn savetag(&mut self, apctx: &mut ApCtx) {
+        if !self.newtag.is_valid() {
+            return;
+        }
+        api::set_tags(self.entry.name(), &apctx.masterpwd, &[self.newtag.string()], false)
+            .expect("Error saving tag");
+        self.newtag = ValidString::new(Box::new(NotEmpty{}));
+
+        self.refresh(apctx);
+        apctx.refresh_tags = true;
     }
 
     fn dirty_msg(&self) -> Option<String> {
@@ -477,10 +493,10 @@ impl Display<ApCtx, bool> for CurrentService {
 
         ui.add(Separator::default());
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for tag in self.entry.get_tags() {
-                let resp = ui.add(Button::new(tag));
-                if resp.clicked() {
+                let tagbutton = Button::new(tag);
+                if ui.add(tagbutton).clicked() {
                     self.confirm.set(
                         "Delete Tag".to_owned(), 
                         Box::new(ConfirmBox::new(
@@ -489,6 +505,14 @@ impl Display<ApCtx, bool> for CurrentService {
                         ))
                     );
                 }
+            }
+            if self.entry.get_tags().len() > 0 {
+                ui.end_row();
+            }
+            let (_, tag_valid) = textedit(ui, &mut self.newtag, Some(&NotInList::new(self.entry.get_tags())), |te, _valid| te.desired_width(50.0));
+            let addtag = Button::new("Add tag").corner_radius(5);
+            if ui.add_enabled(tag_valid, addtag).clicked() {
+                self.savetag(apctx);
             }
         });
 
@@ -545,7 +569,7 @@ impl NewService {
 impl Display<ApCtx, bool> for NewService {
     fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
         let mut keep = true;
-        textedit(ui, &mut self.name, Some(&NotInList::new(&apctx.services)), |te, _valid| {
+        let (_, name_valid) = textedit(ui, &mut self.name, Some(&NotInList::new(&apctx.services)), |te, _valid| {
             te
                 .hint_text("Service Name")
         });
@@ -562,7 +586,7 @@ impl Display<ApCtx, bool> for NewService {
                 ui.add(Label::new(key));
                 ui.add(Label::new("="));
                 ui.add(Label::new(value)
-                    .truncate(true));
+                    .truncate());
                 ui.scope(|ui| {
                     ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
                     if ui.add(Button::new("X")).clicked() {
@@ -587,7 +611,7 @@ impl Display<ApCtx, bool> for NewService {
         ui.horizontal(|ui| {
             ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
                 let save = Button::new("Save");
-                let enabled = self.name.is_valid()
+                let enabled = name_valid
                     && self.password.as_ref().map_or(true, |vs| vs.is_valid())
                     && self.newkvp.is_none();
                 if ui.add_enabled(enabled, save).clicked() {
@@ -662,6 +686,7 @@ impl Action<ApCtx> for MoveTo {
 
 struct ApApp {
     current: Option<Current>,
+    tag_list: Vec<(String, bool)>,
     newservice: Windowed<NewService>,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
     ctx: ApCtx
@@ -675,9 +700,16 @@ impl ApApp {
         let services: Vec<String> = api::list(&pwd, &[]).unwrap_or_else(|e| {
             panic!("Error listing entries: {}", e);
         });
+        let tags = api::list_tags(&pwd).unwrap_or_else(|e| {
+            panic!("Error listing tags: {}", e);
+        })
+            .drain(..)
+            .map(|t| (t, true))
+            .collect();
 
         Self {
             current: None,
+            tag_list: tags,
             newservice: Windowed::new(),
             confirm: Windowed::new(),
             ctx: ApCtx::new(username, pwd, services)
@@ -721,6 +753,17 @@ impl eframe::App for ApApp {
             self.ctx.refresh_service = false;
         }
 
+        if self.ctx.refresh_tags {
+            self.tag_list = api::list_tags(&self.ctx.masterpwd).unwrap_or_else(|e| {
+                eprintln!("Error listing tags: {}", e);
+                vec![]
+            })
+                .drain(..)
+                .map(|t| (t, true))
+                .collect();
+            self.ctx.refresh_tags = false;
+        }
+
         if let Some(ns) = self.ctx.set_service.take() {
             self.current = ns;
         }
@@ -729,11 +772,11 @@ impl eframe::App for ApApp {
 
         egui::SidePanel::left("services")
             .resizable(false)
-            .max_width(100.0)
+            .max_width(120.0)
             .show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("Bottom Left").min_height(25.0).show_separator_line(false).show_inside(ui, |ui| {
                     ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
-                        let addservice = Button::new("Add Service");
+                        let addservice = Button::new("Add Service").wrap_mode(egui::TextWrapMode::Truncate);
                         if ui.add(addservice).clicked() {
                             self.newservice.set("New Service".to_owned(), NewService::new());
                         }
@@ -751,6 +794,38 @@ impl eframe::App for ApApp {
                             None
                         };
                         selected = Some(target);
+                    }
+
+                    // Tags for filtering results
+                    if self.tag_list.len() > 0 {
+                        ui.add(Separator::default());
+
+                        let mut selected = false;
+                        ui.horizontal_wrapped(|ui| {
+                            for (tag, enabled) in &mut self.tag_list {
+                                let color = if *enabled {
+                                    selected = true;
+                                    Color32::GRAY
+                                } else {
+                                    Color32::LIGHT_GRAY
+                                };
+
+                                let tagfilter = Button::new(tag.clone()).fill(color).corner_radius(5);
+
+                                if ui.add(tagfilter).clicked() {
+                                    *enabled = !*enabled;
+                                }
+                            }
+                        });
+
+                        ui.vertical_centered(|ui| {
+                            let toggle_text = if selected { "Unselect Tags" } else { "List All" };
+                            if ui.add(Button::new(toggle_text)).clicked() {
+                                for (_, enabled) in &mut self.tag_list {
+                                    *enabled = !selected;
+                                }
+                            }
+                        });
                     }
 
                     ui.add(Separator::default());

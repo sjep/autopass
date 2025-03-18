@@ -42,6 +42,6 @@ pub fn launch_msgbox(msg: String, app_name: String) {
     let mut native_options = eframe::NativeOptions::default();
     native_options.viewport = viewport;
     let msgbox = MsgBox::new(msg);
-    eframe::run_native(&app_name, native_options, Box::new(|_cc| Box::new(msgbox)))
+    eframe::run_native(&app_name, native_options, Box::new(|_cc| Ok(Box::new(msgbox))))
         .unwrap();
 }
