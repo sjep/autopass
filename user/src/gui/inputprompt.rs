@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::DerefMut, rc::Rc};
 
 use egui::ViewportBuilder;
 
-use super::validator::{textedit, ValidString, Validator};
+use super::validator::{textedit2, Validator};
 
 
 
@@ -11,10 +11,10 @@ pub fn prompt_input(app_name: &str, size: (f32, f32), label: Option<String>, hin
         .with_inner_size(size);
     let mut native_options = eframe::NativeOptions::default();
     native_options.viewport = viewport;
-    let state = InputState { label, hint: hint.to_owned(), input: ValidString::new(validation), is_password };
+    let state = InputState { label, hint: hint.to_owned(), input: String::new(), is_password };
     let state = Rc::new(RefCell::new(state));
     let cstate = state.clone();
-    eframe::run_native(app_name, native_options, Box::new(|_cc| Ok(Box::new(InputPrompt{state: cstate}))))
+    eframe::run_native(app_name, native_options, Box::new(|_cc| Ok(Box::new(InputPrompt{validation, state: cstate}))))
         .unwrap();
     state.take().input.to_owned()
 }
@@ -23,12 +23,13 @@ pub fn prompt_input(app_name: &str, size: (f32, f32), label: Option<String>, hin
 struct InputState {
     label: Option<String>,
     hint: String,
-    input: ValidString,
+    input: String,
     is_password: bool
 }
 
 
 struct InputPrompt {
+    validation: Box<dyn Validator<String>>,
     state: Rc<RefCell<InputState>>,
 }
 
@@ -42,7 +43,7 @@ impl eframe::App for InputPrompt {
             }
             let hint = state.hint.clone();
             let is_password = state.is_password;
-            let (response, valid) = textedit(ui, &mut state.input, None, |te, _| {
+            let (response, valid) = textedit2(ui, &mut state.input, &self.validation, |te, _| {
                 te
                     .password(is_password)
                     .hint_text(&hint)

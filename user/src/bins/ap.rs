@@ -2,7 +2,7 @@
 use egui::{Button, Color32, Label, Layout, RichText, SelectableLabel, Separator, Ui, ViewportBuilder};
 
 use pass::{api::APError, gui::{
-    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, validator::{textedit, LengthBounds, NotEmpty, NotInList, ValidString}, Display, Windowed
+    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, validator::{textedit2, LengthBounds, NotEmpty, NotInList, Validator}, Display, Windowed
 }, spec::{IdentityType, ServiceType}};
 use pass::{api, spec::Serializable};
 
@@ -162,11 +162,11 @@ impl Action<ApCtx> for Box<TagDelete> {
     }
 }
 
-fn newpwdprompt(ui: &mut Ui, password: &mut Option<ValidString>) {
+fn newpwdprompt(ui: &mut Ui, password: &mut Option<String>) -> bool {
     ui.horizontal(|ui| {
         match password {
             Some(pwd) => {
-                textedit(ui, pwd, None, |te, _valid| {
+                let (_, valid) = textedit2(ui, pwd, LengthBounds::new(8, 16), |te, _valid| {
                     te
                         .password(true)
                         .interactive(true)
@@ -176,6 +176,7 @@ fn newpwdprompt(ui: &mut Ui, password: &mut Option<ValidString>) {
                 if ui.button("Auto").clicked() {
                     password.take();
                 }
+                valid
             }
             None => {
                 let mut stub = String::new();
@@ -185,16 +186,17 @@ fn newpwdprompt(ui: &mut Ui, password: &mut Option<ValidString>) {
                     .hint_text("Password Auto Generated");
                 ui.add(newpassword);
                 if ui.button("Manual").clicked() {
-                    password.replace(ValidString::new(Box::new(LengthBounds::new(8, 16))));
+                    password.replace(String::new());
                 }
+                true
             }
         }
-    });
+    }).inner
 }
 
 struct PasswordRefresh {
     service: String,
-    password: Option<ValidString>,
+    password: Option<String>,
 }
 
 impl PasswordRefresh {
@@ -206,8 +208,7 @@ impl PasswordRefresh {
     }
 
     fn refresh_password(&self, apctx: &mut ApCtx) {
-        let pwd = self.password.as_ref().map(|pwd| pwd.string());
-        if let Err(e) = api::upgrade(&self.service, &apctx.masterpwd, pwd) {
+        if let Err(e) = api::upgrade(&self.service, &apctx.masterpwd, self.password.as_ref().map(|s| s.as_str())) {
             eprintln!("Error updating password for service {}: {}", self.service, e);
         }
         apctx.refresh_service = true;
@@ -217,12 +218,11 @@ impl PasswordRefresh {
 impl Display<ApCtx, bool> for PasswordRefresh {
     fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
         let mut keep = true;
-        newpwdprompt(ui, &mut self.password);
+        let enabled = newpwdprompt(ui, &mut self.password);
 
         ui.horizontal(|ui| {
             ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
                 let save = Button::new("Save");
-                let enabled = self.password.as_ref().map_or(true, |vs| vs.is_valid());
                 if ui.add_enabled(enabled, save).clicked() {
                     self.refresh_password(apctx);
                     keep = false;
@@ -238,15 +238,15 @@ impl Display<ApCtx, bool> for PasswordRefresh {
     }
 }
 
-fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(ValidString, ValidString)>, is_save: bool) -> bool {
+fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(String, String)>, is_save: bool) -> bool {
     let mut rmnew = false;
     let mut savekv = false;
     match newkvp {
         Some((key, val)) => {
             ui.horizontal(|ui| {
-                let (_, key_valid) = textedit(ui, key, None, |te, _valid| te.desired_width(50.0));
+                let (_, key_valid) = textedit2(ui, key, NotEmpty{}, |te, _valid| te.desired_width(50.0));
                 ui.add(Label::new("="));
-                let (_, val_valid) = textedit(ui, val, None, |te, _valid| te.desired_width(50.0));
+                let (_, val_valid) = textedit2(ui, val, NotEmpty{}, |te, _valid| te.desired_width(50.0));
 
                 let msg = if is_save { "Save" } else { "Commit" };
                 let commit = Button::new(msg);
@@ -263,7 +263,7 @@ fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(ValidString, ValidString)>,
         }
         None => {
             if ui.add(Button::new("Add key/value")).clicked() {
-                *newkvp = Some((ValidString::new(Box::new(NotEmpty)), ValidString::new(Box::new(NotEmpty))));
+                *newkvp = Some((String::new(), String::new()));
             }
         }
     }
@@ -304,7 +304,7 @@ fn display_kvs(ui: &mut Ui, service: Option<&str>, kvs: &[(String, String)], con
 
 struct CurrentId {
     entry: IdentityType,
-    newkvp: Option<(ValidString, ValidString)>,
+    newkvp: Option<(String, String)>,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
@@ -327,10 +327,7 @@ impl CurrentId {
 
     fn savekvs(&mut self, apctx: &mut ApCtx) {
         if let Some((k, v)) = &self.newkvp {
-            if !k.is_valid() || !v.is_valid() {
-                return;
-            }
-            api::set_kvs_id(&apctx.masterpwd, &[(k.string(), v.string())], false)
+            api::set_kvs_id(&apctx.masterpwd, &[(k, v)], false)
                 .expect("Error saving key value");
             self.newkvp = None;
 
@@ -341,10 +338,10 @@ impl CurrentId {
     fn dirty_msg(&self) -> Option<String> {
         match &self.newkvp {
             Some((nk, nv)) => {
-                if nk.string().len() == 0 && nv.string().len() == 0 {
+                if nk.len() == 0 && nv.len() == 0 {
                     None
                 } else {
-                    Some(format!("Are you sure you want to discard unsaved key/value {} = {}?", nk.string(), nv.string()))
+                    Some(format!("Are you sure you want to discard unsaved key/value {} = {}?", nk, nv))
                 }
             }
             _ => None
@@ -377,8 +374,8 @@ struct CurrentService {
     entry: ServiceType,
     show_pass: bool,
     copied: bool,
-    newkvp: Option<(ValidString, ValidString)>,
-    newtag: ValidString,
+    newkvp: Option<(String, String)>,
+    newtag: String,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
 }
 
@@ -391,7 +388,7 @@ impl CurrentService {
             show_pass: false,
             copied: false,
             newkvp: None,
-            newtag: ValidString::new(Box::new(NotEmpty{})),
+            newtag: String::new(),
             confirm: Windowed::new()
         }
     }
@@ -406,10 +403,7 @@ impl CurrentService {
 
     fn savekvs(&mut self, apctx: &mut ApCtx) {
         if let Some((k, v)) = &self.newkvp {
-            if !k.is_valid() || !v.is_valid() {
-                return;
-            }
-            api::set_kvs(self.entry.name(), &apctx.masterpwd, &[(k.string(), v.string())], false)
+            api::set_kvs(self.entry.name(), &apctx.masterpwd, &[(k, v)], false)
                 .expect("Error saving key value");
             self.newkvp = None;
 
@@ -418,12 +412,9 @@ impl CurrentService {
     }
 
     fn savetag(&mut self, apctx: &mut ApCtx) {
-        if !self.newtag.is_valid() {
-            return;
-        }
-        api::set_tags(self.entry.name(), &apctx.masterpwd, &[self.newtag.string()], false)
+        api::set_tags(self.entry.name(), &apctx.masterpwd, &[&self.newtag], false)
             .expect("Error saving tag");
-        self.newtag = ValidString::new(Box::new(NotEmpty{}));
+        self.newtag = String::new();
 
         self.refresh(apctx);
         apctx.refresh_tags = true;
@@ -432,10 +423,10 @@ impl CurrentService {
     fn dirty_msg(&self) -> Option<String> {
         match &self.newkvp {
             Some((nk, nv)) => {
-                if nk.string().len() == 0 && nv.string().len() == 0 {
+                if nk.len() == 0 && nv.len() == 0 {
                     None
                 } else {
-                    Some(format!("Are you sure you want to discard unsaved key/value {} = {}?", nk.string(), nv.string()))
+                    Some(format!("Are you sure you want to discard unsaved key/value {} = {}?", nk, nv))
                 }
             }
             _ => None
@@ -495,7 +486,7 @@ impl Display<ApCtx, bool> for CurrentService {
 
         ui.horizontal_wrapped(|ui| {
             for tag in self.entry.get_tags() {
-                let tagbutton = Button::new(tag);
+                let tagbutton = Button::new(tag).corner_radius(5.0);
                 if ui.add(tagbutton).clicked() {
                     self.confirm.set(
                         "Delete Tag".to_owned(), 
@@ -509,8 +500,11 @@ impl Display<ApCtx, bool> for CurrentService {
             if self.entry.get_tags().len() > 0 {
                 ui.end_row();
             }
-            let (_, tag_valid) = textedit(ui, &mut self.newtag, Some(&NotInList::new(self.entry.get_tags())), |te, _valid| te.desired_width(50.0));
-            let addtag = Button::new("Add tag").corner_radius(5);
+
+            let not_in_list = NotInList::new(self.entry.get_tags());
+            let tag_validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &not_in_list];
+            let (_, tag_valid) = textedit2(ui, &mut self.newtag, tag_validations, |te, _valid| te.desired_width(50.0));
+            let addtag = Button::new("Add tag");
             if ui.add_enabled(tag_valid, addtag).clicked() {
                 self.savetag(apctx);
             }
@@ -539,28 +533,28 @@ impl Display<ApCtx, bool> for CurrentService {
 }
 
 struct NewService {
-    name: ValidString,
-    password: Option<ValidString>,
+    name: String,
+    password: Option<String>,
     kvs: Vec<(String, String)>,
-    newkvp: Option<(ValidString, ValidString)>
+    newkvp: Option<(String, String)>
 }
 
 impl NewService {
     fn new() -> Self {
-        Self { name: ValidString::new(Box::new(NotEmpty)), password: None, kvs: vec![], newkvp: None }
+        Self { name: String::new(), password: None, kvs: vec![], newkvp: None }
     }
 
     fn save(&self, apctx: &mut ApCtx) {
         if let Err(e) = api::new(
-            self.name.string(),
+            &self.name,
             &apctx.masterpwd,
             &pass::hash::TextMode::NoWhiteSpace,
             16,
             &self.kvs,
             &[],
-            self.password.as_ref().map(|vs| vs.string())
+            self.password.as_ref().map(|s| s.as_str())
         ) {
-            eprintln!("Error saving new service {}: {}", self.name.string(), e);
+            eprintln!("Error saving new service {}: {}", self.name, e);
         }
         apctx.refresh_service_list = true;
     }
@@ -569,14 +563,16 @@ impl NewService {
 impl Display<ApCtx, bool> for NewService {
     fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
         let mut keep = true;
-        let (_, name_valid) = textedit(ui, &mut self.name, Some(&NotInList::new(&apctx.services)), |te, _valid| {
+        let not_in_list = NotInList::new(&apctx.services);
+        let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &not_in_list];
+        let (_, name_valid) = textedit2(ui, &mut self.name, validations, |te, _valid| {
             te
                 .hint_text("Service Name")
         });
 
-        ui.horizontal(|ui| {
-            newpwdprompt(ui, &mut self.password);
-        });
+        let pass_valid = ui.horizontal(|ui| {
+            newpwdprompt(ui, &mut self.password)
+        }).inner;
 
         ui.add(Separator::default());
 
@@ -602,7 +598,7 @@ impl Display<ApCtx, bool> for NewService {
 
         if display_new_kvs(ui, &mut self.newkvp, false) {
             if let Some((k, v)) = self.newkvp.take() {
-                self.kvs.push((k.string().to_owned(), v.string().to_owned()));
+                self.kvs.push((k, v));
             }
         }
 
@@ -612,7 +608,7 @@ impl Display<ApCtx, bool> for NewService {
             ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
                 let save = Button::new("Save");
                 let enabled = name_valid
-                    && self.password.as_ref().map_or(true, |vs| vs.is_valid())
+                    && pass_valid
                     && self.newkvp.is_none();
                 if ui.add_enabled(enabled, save).clicked() {
                     self.save(apctx);

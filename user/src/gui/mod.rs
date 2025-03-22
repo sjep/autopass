@@ -4,6 +4,7 @@ pub mod msgbox;
 pub mod confirmbox;
 pub mod inputprompt;
 pub mod validator;
+pub mod servicelist;
 
 pub trait Display<C, T> {
     fn display(&mut self, ctx: &egui::Context, ui: &mut Ui, apctx: &mut C) -> T;

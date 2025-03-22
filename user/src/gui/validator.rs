@@ -22,7 +22,8 @@ impl<T> Validator<T> for &[&dyn Validator<T>] {
     }
 }
 
-impl<T: Validator<T>> Validator<T> for Box<dyn Validator<T>> {
+impl<T> Validator<T> for &Box<dyn Validator<T>>
+{
     fn valid(&self, obj: &T) -> Result<(), String> {
         self.as_ref().valid(obj)
     }
@@ -91,61 +92,17 @@ impl<'a, T: PartialEq> Validator<T> for NotInList<'a, T> {
     }
 }
 
-pub struct ValidString {
-    string: String,
-    validator: Box<dyn Validator<String>>
-}
-
-impl ValidString {
-    pub fn new(validator: Box<dyn Validator<String>>) -> Self {
-        Self {
-            string: String::new(),
-            validator
-        }
-    }
-
-    pub fn string_mut(&mut self) -> &mut String {
-        &mut self.string
-    }
-
-    pub fn string(&self) -> &str {
-        &self.string
-    }
-
-    pub fn to_owned(self) -> String {
-        self.string
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.validator.valid(&self.string).is_ok()
-    }
-
-    pub fn check(&self, additional: Option<&dyn Validator<String>>) -> Result<(), String> {
-        let mut validators = vec![self.validator.as_ref()];
-        if let Some(v) = additional {
-            validators.push(v);
-        }
-        validators.as_slice().valid(&self.string)
-    }
-}
-
-impl Default for ValidString {
-    fn default() -> Self {
-        Self { string: String::new(), validator: Box::new(()) }
-    }
-}
-
-pub fn textedit(ui: &mut Ui, string: &mut ValidString, additional: Option<&dyn Validator<String>>, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> (Response, bool) {
+pub fn textedit2<V: Validator<String>>(ui: &mut Ui, string: &mut String, validation: V, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> (Response, bool) {
     let resp = ui.scope(|ui| {
-        match string.check(additional) {
+        match validation.valid(string) {
             Ok(()) => {
-                let textedit = TextEdit::singleline(string.string_mut());
+                let textedit = TextEdit::singleline(string);
                 let textedit = modify_textedit(textedit, true);
                 (ui.add(textedit), true)
             }
             Err(msg) => {
                 ui.visuals_mut().extreme_bg_color = ERR_COLOR;
-                let textedit = TextEdit::singleline(string.string_mut());
+                let textedit = TextEdit::singleline(string);
                 let textedit = modify_textedit(textedit, false);
                 (ui.add(textedit).on_hover_text(msg), false)
             }
