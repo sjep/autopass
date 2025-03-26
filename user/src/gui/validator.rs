@@ -71,27 +71,6 @@ impl Validator<String> for LengthBounds {
     }
 }
 
-pub struct NotInList<'a, T> {
-    list: &'a [T]
-}
-
-impl<'a, T> NotInList<'a, T> {
-    pub fn new(list: &'a [T]) -> Self {
-        Self { list }
-    }
-}
-
-impl<'a, T: PartialEq> Validator<T> for NotInList<'a, T> {
-    fn valid(&self, obj: &T) -> Result<(), String> {
-        for item in self.list {
-            if item == obj {
-                return Err("Entry already exists".to_owned());
-            }
-        }
-        Ok(())
-    }
-}
-
 pub fn textedit2<V: Validator<String>>(ui: &mut Ui, string: &mut String, validation: V, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> (Response, bool) {
     let resp = ui.scope(|ui| {
         match validation.valid(string) {

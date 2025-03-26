@@ -23,6 +23,7 @@ impl Bitmap {
     pub fn set(&mut self, val: usize) {
         assert!(val < self.size);
         self.buf[val / 8] |= (1 << (val % 8)) as u8;
+
     }
 
     pub fn unset(&mut self, val: usize) {

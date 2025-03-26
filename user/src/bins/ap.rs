@@ -2,7 +2,7 @@
 use egui::{Button, Color32, Label, Layout, RichText, SelectableLabel, Separator, Ui, ViewportBuilder};
 
 use pass::{api::APError, gui::{
-    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, validator::{textedit2, LengthBounds, NotEmpty, NotInList, Validator}, Display, Windowed
+    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, servicelist::ServiceList, validator::{textedit2, LengthBounds, NotEmpty, Validator}, Display, Windowed
 }, spec::{IdentityType, ServiceType}};
 use pass::{api, spec::Serializable};
 
@@ -62,22 +62,20 @@ fn launch_ap(pwd: String) {
 struct ApCtx {
     username: String,
     masterpwd: String,
-    services: Vec<String>,
+    services: ServiceList,
     refresh_service: bool,
     refresh_service_list: bool,
-    refresh_tags: bool,
     set_service: Option<Option<Current>>, // First optional: are we setting anything, second optional: what we're setting to
 }
 
 impl ApCtx {
-    fn new(username: String, masterpwd: String, services: Vec<String>) -> Self {
+    fn new(username: String, masterpwd: String, services: ServiceList) -> Self {
         Self {
             username,
             masterpwd,
             services,
             refresh_service: false,
             refresh_service_list: false,
-            refresh_tags: false,
             set_service: None,
         }
     }
@@ -93,6 +91,7 @@ impl Action<ApCtx> for Box<DeleteService> {
             eprintln!("Error deleting service {}: {}", self.service, e);
         } else {
             apctx.refresh_service_list = true;
+            apctx.set_service = Some(None);
         }
     }
 }
@@ -158,7 +157,7 @@ impl Action<ApCtx> for Box<TagDelete> {
             panic!("Unable to remove tag from service {}: {}", self.service, e);
         }
         apctx.refresh_service = true;
-        apctx.refresh_tags = true;
+        apctx.refresh_service_list = true;
     }
 }
 
@@ -417,7 +416,7 @@ impl CurrentService {
         self.newtag = String::new();
 
         self.refresh(apctx);
-        apctx.refresh_tags = true;
+        apctx.refresh_service_list = true;
     }
 
     fn dirty_msg(&self) -> Option<String> {
@@ -485,6 +484,17 @@ impl Display<ApCtx, bool> for CurrentService {
         ui.add(Separator::default());
 
         ui.horizontal_wrapped(|ui| {
+            let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &apctx.services.not_in_tags(self.entry.get_name())];
+            let (_, tag_valid) = textedit2(ui, &mut self.newtag, validations, |te, _valid| te.desired_width(50.0));
+            let addtag = Button::new("Add tag");
+            if ui.add_enabled(tag_valid, addtag).clicked() {
+                self.savetag(apctx);
+            }
+
+            if self.entry.get_tags().len() > 0 {
+                ui.end_row();
+            }
+
             for tag in self.entry.get_tags() {
                 let tagbutton = Button::new(tag).corner_radius(5.0);
                 if ui.add(tagbutton).clicked() {
@@ -496,17 +506,6 @@ impl Display<ApCtx, bool> for CurrentService {
                         ))
                     );
                 }
-            }
-            if self.entry.get_tags().len() > 0 {
-                ui.end_row();
-            }
-
-            let not_in_list = NotInList::new(self.entry.get_tags());
-            let tag_validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &not_in_list];
-            let (_, tag_valid) = textedit2(ui, &mut self.newtag, tag_validations, |te, _valid| te.desired_width(50.0));
-            let addtag = Button::new("Add tag");
-            if ui.add_enabled(tag_valid, addtag).clicked() {
-                self.savetag(apctx);
             }
         });
 
@@ -563,8 +562,7 @@ impl NewService {
 impl Display<ApCtx, bool> for NewService {
     fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
         let mut keep = true;
-        let not_in_list = NotInList::new(&apctx.services);
-        let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &not_in_list];
+        let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &apctx.services.not_in_services()];
         let (_, name_valid) = textedit2(ui, &mut self.name, validations, |te, _valid| {
             te
                 .hint_text("Service Name")
@@ -682,7 +680,6 @@ impl Action<ApCtx> for MoveTo {
 
 struct ApApp {
     current: Option<Current>,
-    tag_list: Vec<(String, bool)>,
     newservice: Windowed<NewService>,
     confirm: Windowed<Box<dyn Display<ApCtx, bool>>>,
     ctx: ApCtx
@@ -693,19 +690,12 @@ impl ApApp {
         let username = api::get_id(&pwd).unwrap_or_else(|e| {
             panic!("Unable to parse identity file: {}", e);
         }).name().to_owned();
-        let services: Vec<String> = api::list(&pwd, &[]).unwrap_or_else(|e| {
-            panic!("Error listing entries: {}", e);
+        let services = ServiceList::new(&pwd).unwrap_or_else(|e| {
+            panic!("Unable to list services: {}", e);
         });
-        let tags = api::list_tags(&pwd).unwrap_or_else(|e| {
-            panic!("Error listing tags: {}", e);
-        })
-            .drain(..)
-            .map(|t| (t, true))
-            .collect();
 
         Self {
             current: None,
-            tag_list: tags,
             newservice: Windowed::new(),
             confirm: Windowed::new(),
             ctx: ApCtx::new(username, pwd, services)
@@ -734,12 +724,14 @@ impl eframe::App for ApApp {
         self.confirm.display(ctx, &mut self.ctx);
 
         if self.ctx.refresh_service_list {
-            self.ctx.services = api::list(&self.ctx.masterpwd, &[]).unwrap_or_else(|e| {
-                eprintln!("Error listing entries: {}", e);
-                vec![]
+            self.ctx.services.refresh(&self.ctx.masterpwd).unwrap_or_else(|e| {
+                panic!("Unable to list services: {}", e);
             });
             self.ctx.refresh_service_list = false;
-            self.current = None;
+        }
+
+        if let Some(ns) = self.ctx.set_service.take() {
+            self.current = ns;
         }
 
         if self.ctx.refresh_service {
@@ -747,21 +739,6 @@ impl eframe::App for ApApp {
                 s.refresh(&self.ctx);
             }
             self.ctx.refresh_service = false;
-        }
-
-        if self.ctx.refresh_tags {
-            self.tag_list = api::list_tags(&self.ctx.masterpwd).unwrap_or_else(|e| {
-                eprintln!("Error listing tags: {}", e);
-                vec![]
-            })
-                .drain(..)
-                .map(|t| (t, true))
-                .collect();
-            self.ctx.refresh_tags = false;
-        }
-
-        if let Some(ns) = self.ctx.set_service.take() {
-            self.current = ns;
         }
 
         self.newservice.display(ctx, &mut self.ctx);
@@ -793,12 +770,13 @@ impl eframe::App for ApApp {
                     }
 
                     // Tags for filtering results
-                    if self.tag_list.len() > 0 {
+                    let tags = self.ctx.services.tags_mut();
+                    if tags.len() > 0 {
                         ui.add(Separator::default());
 
                         let mut selected = false;
                         ui.horizontal_wrapped(|ui| {
-                            for (tag, enabled) in &mut self.tag_list {
+                            for (tag, enabled) in &mut *tags {
                                 let color = if *enabled {
                                     selected = true;
                                     Color32::GRAY
@@ -814,19 +792,21 @@ impl eframe::App for ApApp {
                             }
                         });
 
+                        /*
                         ui.vertical_centered(|ui| {
                             let toggle_text = if selected { "Unselect Tags" } else { "List All" };
                             if ui.add(Button::new(toggle_text)).clicked() {
-                                for (_, enabled) in &mut self.tag_list {
+                                for (_, enabled) in tags {
                                     *enabled = !selected;
                                 }
                             }
                         });
+                        */
                     }
 
                     ui.add(Separator::default());
 
-                    for service in self.ctx.services.iter() {
+                    for service in self.ctx.services.iter_visible_services() {
                         let is_selected = self.current.as_ref().map(|c| c.is_service(&service)).unwrap_or(false);
                         if ui.add(SelectableLabel::new(is_selected, service)).clicked() {
                             let target = if self.current.is_none() || !self.current.as_ref().unwrap().is_service(service) {
