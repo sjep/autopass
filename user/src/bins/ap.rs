@@ -2,7 +2,7 @@
 use egui::{Button, Color32, Label, Layout, RichText, SelectableLabel, Separator, Ui, ViewportBuilder};
 
 use pass::{api::APError, gui::{
-    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, servicelist::ServiceList, validator::{textedit2, LengthBounds, NotEmpty, Validator}, Display, Windowed
+    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, servicelist::ServiceList, validator::{textedit2, LengthBounds, NotEmpty, NotInList, Validator}, Display, Windowed
 }, spec::{IdentityType, ServiceType}};
 use pass::{api, spec::Serializable};
 
@@ -496,8 +496,11 @@ impl Display<ApCtx, bool> for CurrentService {
             }
 
             for tag in self.entry.get_tags() {
-                let tagbutton = Button::new(tag).corner_radius(5.0);
-                if ui.add(tagbutton).clicked() {
+                let tagbutton = Button::new(tag)
+                    .corner_radius(5.0);
+                let resp = ui.add(tagbutton)
+                    .on_hover_text("Delete tag");
+                if resp.clicked() {
                     self.confirm.set(
                         "Delete Tag".to_owned(), 
                         Box::new(ConfirmBox::new(
@@ -535,12 +538,14 @@ struct NewService {
     name: String,
     password: Option<String>,
     kvs: Vec<(String, String)>,
-    newkvp: Option<(String, String)>
+    newkvp: Option<(String, String)>,
+    tags: Vec<String>,
+    newtag: Option<String>
 }
 
 impl NewService {
     fn new() -> Self {
-        Self { name: String::new(), password: None, kvs: vec![], newkvp: None }
+        Self { name: String::new(), password: None, kvs: vec![], newkvp: None, tags: vec![], newtag: None }
     }
 
     fn save(&self, apctx: &mut ApCtx) {
@@ -550,7 +555,7 @@ impl NewService {
             &pass::hash::TextMode::NoWhiteSpace,
             16,
             &self.kvs,
-            &[],
+            &self.tags,
             self.password.as_ref().map(|s| s.as_str())
         ) {
             eprintln!("Error saving new service {}: {}", self.name, e);
@@ -602,12 +607,64 @@ impl Display<ApCtx, bool> for NewService {
 
         ui.add(Separator::default());
 
+        ui.horizontal_wrapped(|ui| {
+            let mut rmnewtag = false;
+
+            match &mut self.newtag {
+                Some(nt) => {
+                    let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &NotInList::new(&self.tags)];
+                    let (_, tag_valid) = textedit2(ui, nt, validations, |te, _valid| te.desired_width(50.0));
+                    let addtag = Button::new("Add tag");
+                    if ui.add_enabled(tag_valid, addtag).clicked() {
+                        self.tags.push(nt.to_owned());
+                        rmnewtag = true;
+                    }
+                    ui.scope(|ui| {
+                        ui.visuals_mut().override_text_color = Some(Color32::DARK_RED);
+                        if ui.add(Button::new("X")).clicked() {
+                            rmnewtag = true;
+                        }
+                    });
+                }
+                None => {
+                    if ui.add(Button::new("New tag")).clicked() {
+                        self.newtag = Some(String::new());
+                    }
+                }
+            }
+            if rmnewtag {
+                self.newtag = None;
+            }
+
+            if self.tags.len() > 0 {
+                ui.end_row();
+            }
+
+            let mut torm = vec![];
+
+            for (idx, tag) in self.tags.iter().enumerate() {
+                let tagbutton = Button::new(tag).corner_radius(5.0);
+                let resp = ui.add(tagbutton)
+                    .on_hover_text("Remove");
+                if resp.clicked() {
+                    torm.push(idx);
+                }
+            }
+
+            for tagidx in torm {
+                self.tags.remove(tagidx);
+            }
+        });
+
+        ui.add(Separator::default());
+
         ui.horizontal(|ui| {
             ui.with_layout(Layout::left_to_right(egui::Align::Max), |ui| {
                 let save = Button::new("Save");
                 let enabled = name_valid
                     && pass_valid
-                    && self.newkvp.is_none();
+                    && self.newkvp.is_none()
+                    && self.newtag.is_none();
                 if ui.add_enabled(enabled, save).clicked() {
                     self.save(apctx);
                     keep = false;
@@ -619,6 +676,7 @@ impl Display<ApCtx, bool> for NewService {
                 }
             });
         });
+
         keep
     }
 }

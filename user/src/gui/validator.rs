@@ -46,6 +46,28 @@ impl Validator<String> for () {
     }
 }
 
+pub struct NotInList<'a, T> {
+    list: &'a [T]
+}
+
+impl<'a, T> NotInList<'a, T> {
+    pub fn new(list: &'a [T]) -> Self {
+        Self {list}
+    }
+}
+
+impl<'a, T> Validator<T> for NotInList<'a, T>
+where T: PartialEq {
+    fn valid(&self, obj: &T) -> Result<(), String> {
+        for item in self.list {
+            if item == obj {
+                return Err("Entry is already in list.".to_owned())
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct LengthBounds {
     least: usize,
     most: usize
