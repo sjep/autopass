@@ -13,14 +13,14 @@ pub enum APUpgradeError {
     InProgress
 }
 
-fn try_open<O: Encryptor, T: Serializable>(objname: &str, key: &[u8]) -> bool {
+fn try_open<O: Encryptor, T: for <'de> Serializable<'de>>(objname: &str, key: &[u8]) -> bool {
     let path = O::full_path(key, objname);
     File::open(&path).ok().map(|mut f| {
         load::<T, O>(&mut f, &key).ok()
     }).flatten().is_some()
 }
 
-pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: Serializable>(pass: &str) -> Result<(), APUpgradeError> {
+pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: for <'de> Serializable<'de>>(pass: &str) -> Result<(), APUpgradeError> {
     let legacy_dir = base_path().join("legacy");
     std::fs::create_dir_all(&legacy_dir).unwrap();
     let inprogress = legacy_dir.read_dir().unwrap().next().is_some();
@@ -56,7 +56,7 @@ pub fn upgrade_encryptor<O: Encryptor, N: Encryptor, T: Serializable>(pass: &str
     Ok(())
 }
 
-fn upgrade_spec<E: Encryptor, O: Serializable, N: Serializable + From<O>>(file: &mut File, key: &[u8]) -> Result<(), APError> {
+fn upgrade_spec<E: Encryptor, O: for <'de> Serializable<'de>, N: for <'de> Serializable<'de> + From<O>>(file: &mut File, key: &[u8]) -> Result<(), APError> {
     let old = load::<O, E>(file, key)?;
     let new = N::from(old);
     file.set_len(0)?;
@@ -88,5 +88,6 @@ pub fn check_upgrade<E: Encryptor>(filename: &PathBuf, key: &[u8]) -> Result<(),
             2 => Ok(()),
             _ => Err(APError::VersionTooOld)
         }
+        SpecType::ChangeLog => Ok(())
     }
 }

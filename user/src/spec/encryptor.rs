@@ -17,7 +17,7 @@ pub struct Encrypt {
 }
 
 impl Encryptor for Encrypt {
-    fn encrypt<T: super::Serializable>(key: &[u8], obj: &T) -> Self {
+    fn encrypt<T: for <'de> super::Serializable<'de>>(key: &[u8], obj: &T) -> Self {
         let bin = obj.to_binary();
 
         let key = Key::<Aes256Gcm>::from_slice(key);
@@ -32,7 +32,7 @@ impl Encryptor for Encrypt {
         }
     }
 
-    fn decrypt<T: super::Serializable>(&self, key: &[u8]) -> Option<T> {
+    fn decrypt<T: for <'de> super::Serializable<'de>>(&self, key: &[u8]) -> Option<T> {
         let key = Key::<Aes256Gcm>::from_slice(key);
         let cipher = Aes256Gcm::new(&key);
 

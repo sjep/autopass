@@ -10,12 +10,15 @@ pub mod service_v2;
 pub mod identity_v1;
 pub mod identity_v2;
 pub mod encryptor;
+pub mod changelog;
 
 pub const PASS_PATH: &'static str = ".pass";
 pub const PASS_BASE_ENVVAR: &'static str = "AP_BASEDIR";
 const IDENTITY_MAGIC: u32 = 0xfedb1234;
 const SERVICE_MAGIC: u32 = 0x83596235;
+const CHANGELOG_MAGIC: u32 = 0x18a283f7;
 const IDENTITY_FNAME: &str = ".apid";
+const CHANGELOG_FNAME: &str = ".clog";
 
 pub const VERSION: u32 = 2;
 pub type EncryptorType = crate::spec::encryptor::Encrypt;
@@ -36,15 +39,23 @@ pub fn identity_path<P: AsRef<Path>>(basedir: P) -> PathBuf {
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq)]
 pub enum SpecType {
     Service,
-    Identity
+    Identity,
+    ChangeLog
 }
 
-pub trait Serializable: Sized {
+pub trait Serializable<'de>: Sized + Serialize + Deserialize<'de> {
     fn name(&self) -> &str;
 
-    fn to_binary(&self) -> Vec<u8>;
+    fn to_binary(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
 
-    fn from_binary(bin: &[u8]) -> Option<Self>;
+    fn from_binary(bin: &'de[u8]) -> Option<Self> {
+        match bincode::deserialize(bin) {
+            Ok(entry) => Some(entry),
+            Err(_) => None
+        }
+    }
 
     fn sanity_check(&self) -> bool;
 
@@ -56,9 +67,9 @@ pub trait Serializable: Sized {
 pub type APKey = [u8; 32];
 
 pub trait Encryptor: Serialize + for <'a> Deserialize<'a> {
-    fn encrypt<T: Serializable>(key: &[u8], obj: &T) -> Self;
+    fn encrypt<T: for <'de> Serializable<'de>>(key: &[u8], obj: &T) -> Self;
 
-    fn decrypt<T: Serializable>(&self, key: &[u8]) -> Option<T>;
+    fn decrypt<T: for <'de> Serializable<'de>>(&self, key: &[u8]) -> Option<T>;
 
     fn encrypt_version() -> u16;
 
@@ -105,7 +116,7 @@ pub struct Header {
 const HEADER_SIZE: usize = 8;
 
 impl Header {
-    fn create<T: Serializable, E: Encryptor>(entry: &T) -> Self {
+    fn create<'de, T: Serializable<'de>, E: Encryptor>(entry: &T) -> Self {
         Self {
             spec_type: entry.spec_type(),
             spec_version: entry.version(),
@@ -114,7 +125,7 @@ impl Header {
     }
 }
 
-pub fn save<T: Serializable>(file: &mut File, key: &[u8], service: &T) -> Result<(), APError> {
+pub fn save<T: for <'de> Serializable<'de>>(file: &mut File, key: &[u8], service: &T) -> Result<(), APError> {
     assert!(file.metadata()?.len() == 0);
     let encrypted = EncryptorType::encrypt(key, service);
     let header = Header::create::<T, EncryptorType>(service);
@@ -133,7 +144,7 @@ pub fn load_header(file: &mut File) -> Result<Header, APError> {
     Ok(header)
 }
 
-pub fn load<T: Serializable, E: Encryptor>(file: &mut File, key: &[u8]) -> Result<T, APError> {
+pub fn load<T: for <'de> Serializable<'de>, E: Encryptor>(file: &mut File, key: &[u8]) -> Result<T, APError> {
     let mut data = vec![];
     file.read_to_end(&mut data).unwrap();
     let header = bincode::deserialize::<Header>(&data[0..HEADER_SIZE])?;

@@ -4,7 +4,6 @@ use std::fs::{File, read_dir, remove_file};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::spec::service_v2::ServiceEntryV2;
 use crate::spec::{base_path, identity_path, load, load_header, save, APKey, Encryptor, EncryptorType, IdentityType, Serializable, ServiceType, SpecType};
 use crate::hash::{bin_to_str, TextMode};
 use crate::upgrade::check_upgrade;

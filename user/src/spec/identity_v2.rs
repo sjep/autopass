@@ -68,7 +68,7 @@ impl IdentityV2 {
     }
 }
 
-impl Serializable for IdentityV2 {
+impl<'de> Serializable<'de> for IdentityV2 {
     fn name(&self) -> &str {
         &self.name
     }

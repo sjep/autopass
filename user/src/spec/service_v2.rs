@@ -146,7 +146,7 @@ impl ServiceEntryV2 {
 
 }
 
-impl Serializable for ServiceEntryV2 {
+impl<'de> Serializable<'de> for ServiceEntryV2 {
     fn to_binary(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
