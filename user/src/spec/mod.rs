@@ -7,6 +7,7 @@ use crate::api::APError;
 
 pub mod service_v1;
 pub mod service_v2;
+pub mod service_v3;
 pub mod identity_v1;
 pub mod identity_v2;
 pub mod encryptor;
@@ -20,7 +21,7 @@ const IDENTITY_FNAME: &str = ".apid";
 pub const VERSION: u32 = 2;
 pub type EncryptorType = crate::spec::encryptor::Encrypt;
 pub type IdentityType = identity_v2::IdentityV2;
-pub type ServiceType = service_v2::ServiceEntryV2;
+pub type ServiceType = service_v3::ServiceEntryV3;
 
 pub fn base_path() -> PathBuf {
     if let Ok(basepath) = std::env::var(PASS_BASE_ENVVAR) {
@@ -205,7 +206,7 @@ impl From<self::identity_v1::IdentityV1> for self::identity_v2::IdentityV2 {
     }
 }
 
-impl From<self::service_v1::ServiceEntryV1> for self::service_v2::ServiceEntryV2 {
+impl From<self::service_v1::ServiceEntryV1> for self::service_v3::ServiceEntryV3 {
     fn from(value: self::service_v1::ServiceEntryV1) -> Self {
         let mut kv = vec![];
         for (k, v) in value.kv {
@@ -223,6 +224,32 @@ impl From<self::service_v1::ServiceEntryV1> for self::service_v2::ServiceEntryV2
             text_mode: value.text_mode,
             create_time: value.create_time,
             modify_time: value.modify_time,
+            link: None,
+            synced: false,
+        }
+    }
+}
+
+impl From<self::service_v2::ServiceEntryV2> for self::service_v3::ServiceEntryV3 {
+    fn from(value: self::service_v2::ServiceEntryV2) -> Self {
+        let mut kv = vec![];
+        for (k, v) in value.kv {
+            kv.push((k, v));
+        }
+        kv.sort();
+        Self {
+            magic: SERVICE_MAGIC,
+            name: value.name,
+            pass: value.pass,
+            nonce: value.nonce,
+            kv,
+            tags: Vec::new(),
+            len: value.len,
+            text_mode: value.text_mode,
+            create_time: value.create_time,
+            modify_time: value.modify_time,
+            link: None,
+            synced: false,
         }
     }
 }

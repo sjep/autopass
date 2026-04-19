@@ -556,7 +556,9 @@ impl NewService {
             16,
             &self.kvs,
             &self.tags,
-            self.password.as_ref().map(|s| s.as_str())
+            None,
+            self.password.as_ref().map(|s| s.as_str(),
+        )
         ) {
             eprintln!("Error saving new service {}: {}", self.name, e);
         }
