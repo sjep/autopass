@@ -12,8 +12,8 @@ impl MsgBox {
     }
 }
 
-impl Display<(), bool> for MsgBox {
-    fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, _apctx: &mut ()) -> bool {
+impl<C> Display<C, bool> for MsgBox {
+    fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, _apctx: &mut C) -> bool {
         let mut close  = false;
         ui.label(&self.msg);
         ui.vertical_centered(|ui| {

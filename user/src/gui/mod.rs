@@ -1,8 +1,10 @@
 use egui::Ui;
 
+pub mod linkutil;
 pub mod msgbox;
 pub mod confirmbox;
 pub mod inputprompt;
+pub mod inputbox;
 pub mod validator;
 pub mod servicelist;
 

@@ -2,7 +2,7 @@ use std::{fs::File, io::Seek, path::PathBuf};
 
 use thiserror::Error;
 
-use crate::{api::{self, APError}, spec::{base_path, identity_v1::IdentityV1, identity_v2::IdentityV2, load, load_header, save, service_v1::ServiceEntryV1, service_v2::ServiceEntryV2, Encryptor, EncryptorType, Serializable, SpecType}};
+use crate::{api::{self, APError}, spec::{Encryptor, EncryptorType, Serializable, SpecType, base_path, identity_v1::IdentityV1, identity_v2::IdentityV2, load, load_header, save, service_v1::ServiceEntryV1, service_v2::ServiceEntryV2, service_v3::ServiceEntryV3}};
 
 
 #[derive(Error, Debug)]
@@ -79,8 +79,9 @@ pub fn check_upgrade<E: Encryptor>(filename: &PathBuf, key: &[u8]) -> Result<(),
 
     match header.spec_type {
         SpecType::Service => match header.spec_version {
-            1 => upgrade_spec::<EncryptorType, ServiceEntryV1, ServiceEntryV2>(&mut file, key),
-            2 => Ok(()),
+            1 => upgrade_spec::<EncryptorType, ServiceEntryV1, ServiceEntryV3>(&mut file, key),
+            2 => upgrade_spec::<EncryptorType, ServiceEntryV2, ServiceEntryV3>(&mut file, key),
+            3 => Ok(()),
             _ => Err(APError::VersionTooOld)
         }
         SpecType::Identity => match header.spec_version {

@@ -4,7 +4,6 @@ use std::fs::{File, read_dir, remove_file};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::spec::service_v2::ServiceEntryV2;
 use crate::spec::{base_path, identity_path, load, load_header, save, APKey, Encryptor, EncryptorType, IdentityType, Serializable, ServiceType, SpecType};
 use crate::hash::{bin_to_str, TextMode};
 use crate::upgrade::check_upgrade;
@@ -134,7 +133,8 @@ pub fn new<T: AsRef<str>>(
     len: u8,
     kvs: &[(T, T)],
     tags: &[T],
-    service_pass: Option<&str>) -> Result<ServiceType, APError>
+    service_pass: Option<&str>,
+    link: Option<&str>) -> Result<ServiceType, APError>
 {
     let key = load_id(pass)?.key();
 
@@ -154,7 +154,8 @@ pub fn new<T: AsRef<str>>(
         kvs,
         tags,
         len,
-        text_mode
+        text_mode,
+        link,
     );
     let path = base_path();
     std::fs::create_dir_all(path)?;
@@ -198,6 +199,19 @@ pub fn set_tags<S: AsRef<str>>(name: &str,
 
     let (mut entry, key) = load_entry(&name, &pass)?;
     entry.set_tags(tags, reset);
+    let full_path = EncryptorType::full_path(&key, entry.get_name());
+    let mut file = File::create(full_path)?;
+    save(&mut file, &key, &entry)?;
+    Ok(())
+}
+
+pub fn set_link(
+    name: &str,
+    pass: &str,
+    link: Option<&str>) -> Result<(), APError>
+{
+    let (mut entry, key) = load_entry(&name, &pass)?;
+    entry.set_link(link);
     let full_path = EncryptorType::full_path(&key, entry.get_name());
     let mut file = File::create(full_path)?;
     save(&mut file, &key, &entry)?;

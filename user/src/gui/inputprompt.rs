@@ -6,7 +6,7 @@ use super::validator::{textedit2, Validator};
 
 
 
-pub fn prompt_input(app_name: &str, size: (f32, f32), label: Option<String>, hint: &str, validation: Box<dyn Validator<String>>, is_password: bool) -> String {
+pub fn prompt_input<V: Validator<String>>(app_name: &str, size: (f32, f32), label: Option<String>, hint: &str, validation: V, is_password: bool) -> String {
     let viewport = ViewportBuilder::default()
         .with_inner_size(size);
     let mut native_options = eframe::NativeOptions::default();
@@ -28,12 +28,12 @@ struct InputState {
 }
 
 
-struct InputPrompt {
-    validation: Box<dyn Validator<String>>,
+struct InputPrompt<V> {
+    validation: V,
     state: Rc<RefCell<InputState>>,
 }
 
-impl eframe::App for InputPrompt {
+impl<V: Validator<String>> eframe::App for InputPrompt<V> {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             let mut stateref = (*self.state).borrow_mut();

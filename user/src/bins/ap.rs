@@ -2,7 +2,7 @@
 use egui::{Button, Color32, Label, Layout, RichText, SelectableLabel, Separator, Ui, ViewportBuilder};
 
 use pass::{api::APError, gui::{
-    confirmbox::{Action, ConfirmBox}, inputprompt::prompt_input, msgbox::launch_msgbox, servicelist::ServiceList, validator::{textedit2, LengthBounds, NotEmpty, NotInList, Validator}, Display, Windowed
+    Display, Windowed, confirmbox::{Action, ConfirmBox}, inputbox::{InputAction, InputBox}, inputprompt::prompt_input, linkutil, msgbox::launch_msgbox, servicelist::ServiceList, validator::{LengthBounds, NotEmpty, NotInList, Validator, textedit2}
 }, spec::{IdentityType, ServiceType}};
 use pass::{api, spec::Serializable};
 
@@ -15,7 +15,7 @@ fn main() -> Result<(), APError> {
             (200.0, 50.0),
             None,
             "New master password",
-            Box::new(()),
+            (),
             true);
         if pwd1 == "" {
             return Ok(());
@@ -25,7 +25,7 @@ fn main() -> Result<(), APError> {
             (200.0, 50.0),
             None,
             "Confirm new master password",
-            Box::new(()),
+            (),
             true);
         if pwd1 != pwd2 {
             launch_msgbox("Passwords didn't match".to_owned(), "Mismatch".to_owned());
@@ -36,12 +36,12 @@ fn main() -> Result<(), APError> {
             (200.0, 100.0),
             Some("One last thing: provide an identifier (username) for yourself for sharing purposes".to_owned()),
             "Username",
-            Box::new(NotEmpty),
+            NotEmpty,
             false);
         api::init::<&str>(&username, &pwd1, &[])?;
         pwd1
     } else {
-        prompt_input("Password Prompt", (200.0, 50.0), None, "Master Password", Box::new(()), true)
+        prompt_input("Password Prompt", (200.0, 50.0), None, "Master Password", (), true)
     };
 
     if pwd != "" {
@@ -161,11 +161,37 @@ impl Action<ApCtx> for Box<TagDelete> {
     }
 }
 
+struct ChangeLink {
+    service: String
+}
+
+impl InputAction<ApCtx> for Box<ChangeLink> {
+    fn doit(&mut self, input: &str, apctx: &mut ApCtx) {
+        if let Err(e) = api::set_link(&self.service, &apctx.masterpwd, Some(input)) {
+            panic!("Unable to change link for service {}: {}", self.service, e);
+        }
+        apctx.refresh_service = true;
+    }
+}
+
+struct RemoveLink {
+    service: String
+}
+
+impl Action<ApCtx> for Box<RemoveLink> {
+    fn doit(&mut self, apctx: &mut ApCtx) {
+        if let Err(e) = api::set_link(&self.service, &apctx.masterpwd, None) {
+            panic!("Unable to remove link for service {}: {}", self.service, e);
+        }
+        apctx.refresh_service = true;
+    }
+}
+
 fn newpwdprompt(ui: &mut Ui, password: &mut Option<String>) -> bool {
     ui.horizontal(|ui| {
         match password {
             Some(pwd) => {
-                let (_, valid) = textedit2(ui, pwd, LengthBounds::new(8, 16), |te, _valid| {
+                let (_, valid) = textedit2(ui, pwd, &LengthBounds::new(8, 16), |te, _valid| {
                     te
                         .password(true)
                         .interactive(true)
@@ -243,9 +269,9 @@ fn display_new_kvs(ui: &mut Ui, newkvp: &mut Option<(String, String)>, is_save: 
     match newkvp {
         Some((key, val)) => {
             ui.horizontal(|ui| {
-                let (_, key_valid) = textedit2(ui, key, NotEmpty{}, |te, _valid| te.desired_width(50.0));
+                let (_, key_valid) = textedit2(ui, key, &NotEmpty{}, |te, _valid| te.desired_width(50.0));
                 ui.add(Label::new("="));
-                let (_, val_valid) = textedit2(ui, val, NotEmpty{}, |te, _valid| te.desired_width(50.0));
+                let (_, val_valid) = textedit2(ui, val, &NotEmpty{}, |te, _valid| te.desired_width(50.0));
 
                 let msg = if is_save { "Save" } else { "Commit" };
                 let commit = Button::new(msg);
@@ -471,6 +497,29 @@ impl Display<ApCtx, bool> for CurrentService {
         ui.add(Label::new(format!("Created: {}", self.entry.created())));
         ui.add(Label::new(format!("Last Modified: {}", self.entry.modified())));
 
+        /* Link section */
+        ui.horizontal_wrapped(|ui| {
+            let mut button_text = "Add link";
+            if let Some(link) = self.entry.get_link() {
+                linkutil::https_link(ui, link);
+                button_text = "Change link";
+                if ui.add(Button::new("Remove link")).clicked() {
+                    self.confirm.set("Remove link".to_owned(), Box::new(ConfirmBox::new(
+                        "Are you sure you want to remove this link?".to_owned(),
+                    Box::new(RemoveLink{service: self.entry.name().to_owned()})
+                    )));
+                }
+            }
+            
+            if ui.add(Button::new(button_text)).clicked() {
+                self.confirm.set(button_text.to_owned(), Box::new(InputBox::new(
+                    "Set new link".to_owned(),
+                    Box::new(ChangeLink{service: self.entry.name().to_owned()}),
+                    NotEmpty
+                )));
+            }
+        });
+
         /* Kvs section */
         let kvs = self.entry.get_kvs();
 
@@ -481,11 +530,12 @@ impl Display<ApCtx, bool> for CurrentService {
             self.savekvs(apctx);
         }
 
+        /* Tags section */
         ui.add(Separator::default());
 
         ui.horizontal_wrapped(|ui| {
             let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &apctx.services.not_in_tags(self.entry.get_name())];
-            let (_, tag_valid) = textedit2(ui, &mut self.newtag, validations, |te, _valid| te.desired_width(50.0));
+            let (_, tag_valid) = textedit2(ui, &mut self.newtag, &validations, |te, _valid| te.desired_width(50.0));
             let addtag = Button::new("Add tag");
             if ui.add_enabled(tag_valid, addtag).clicked() {
                 self.savetag(apctx);
@@ -499,7 +549,7 @@ impl Display<ApCtx, bool> for CurrentService {
                 let tagbutton = Button::new(tag)
                     .corner_radius(5.0);
                 let resp = ui.add(tagbutton)
-                    .on_hover_text("Delete tag");
+                    .on_hover_text("Click to delete tag");
                 if resp.clicked() {
                     self.confirm.set(
                         "Delete Tag".to_owned(), 
@@ -537,18 +587,31 @@ impl Display<ApCtx, bool> for CurrentService {
 struct NewService {
     name: String,
     password: Option<String>,
+    link: String,
     kvs: Vec<(String, String)>,
     newkvp: Option<(String, String)>,
     tags: Vec<String>,
-    newtag: Option<String>
+    newtag: Option<String>,
+    first_pass: bool,
 }
 
 impl NewService {
     fn new() -> Self {
-        Self { name: String::new(), password: None, kvs: vec![], newkvp: None, tags: vec![], newtag: None }
+        Self {
+            name: String::new(),
+            password: None,
+            link: String::new(),
+            kvs: vec![],
+            newkvp: None,
+            tags: vec![],
+            newtag: None,
+            first_pass: true
+        }
     }
 
     fn save(&self, apctx: &mut ApCtx) {
+        let link = if self.link.len() == 0 { None } else { Some(self.link.as_str()) };
+
         if let Err(e) = api::new(
             &self.name,
             &apctx.masterpwd,
@@ -556,7 +619,8 @@ impl NewService {
             16,
             &self.kvs,
             &self.tags,
-            self.password.as_ref().map(|s| s.as_str())
+            self.password.as_ref().map(|s| s.as_str()),
+            link,
         ) {
             eprintln!("Error saving new service {}: {}", self.name, e);
         }
@@ -568,15 +632,25 @@ impl Display<ApCtx, bool> for NewService {
     fn display(&mut self, _ctx: &egui::Context, ui: &mut Ui, apctx: &mut ApCtx) -> bool {
         let mut keep = true;
         let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &apctx.services.not_in_services()];
-        let (_, name_valid) = textedit2(ui, &mut self.name, validations, |te, _valid| {
+        let (resp, name_valid) = textedit2(ui, &mut self.name, &validations, |te, _valid| {
             te
                 .hint_text("Service Name")
         });
+        /* Give keyboard focus to the new service name */
+        if self.first_pass {
+            ui.memory_mut(|m| {
+                m.request_focus(resp.id);
+            });
+            self.first_pass = false;
+        }
 
         let pass_valid = ui.horizontal(|ui| {
             newpwdprompt(ui, &mut self.password)
         }).inner;
 
+        textedit2(ui, &mut self.link, &(), |te, _valid| te.hint_text("Link"));
+
+        /* kvs section */
         ui.add(Separator::default());
 
         let mut delidx = None;
@@ -605,6 +679,7 @@ impl Display<ApCtx, bool> for NewService {
             }
         }
 
+        /* tag section */
         ui.add(Separator::default());
 
         ui.horizontal_wrapped(|ui| {
@@ -613,7 +688,7 @@ impl Display<ApCtx, bool> for NewService {
             match &mut self.newtag {
                 Some(nt) => {
                     let validations: &[&dyn Validator<String>] = &[&NotEmpty{}, &NotInList::new(&self.tags)];
-                    let (_, tag_valid) = textedit2(ui, nt, validations, |te, _valid| te.desired_width(50.0));
+                    let (_, tag_valid) = textedit2(ui, nt, &validations, |te, _valid| te.desired_width(50.0));
                     let addtag = Button::new("Add tag");
                     if ui.add_enabled(tag_valid, addtag).clicked() {
                         self.tags.push(nt.to_owned());

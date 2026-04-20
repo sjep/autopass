@@ -101,7 +101,7 @@ fn init_cmd(matches: &ArgMatches) {
         eprintln!("Passwords don't match");
         return;
     }
-    let name = matches.value_of("name").unwrap();
+    let name = matches.value_of("identity").unwrap();
     let kvs: Vec<(&str, &str)> = match fetch_kvs(&matches) {
         Ok(k) => k,
         Err(s) => {
@@ -161,8 +161,9 @@ fn new_cmd(matches: &ArgMatches) {
     };
 
     let set_password = matches.value_of("set-password");
+    let link = matches.value_of("link");
 
-    match api::new(name, &pass, &text_mode, len, &kvs, &tags, set_password)  {
+    match api::new(name, &pass, &text_mode, len, &kvs, &tags, set_password, link)  {
         Ok(entry) => println!("New password created for service '{}':\n{}", name, entry.get_pass(false).unwrap()),
         Err(s) => eprintln!("Error creating service: {}", s)
     };
@@ -289,6 +290,16 @@ fn set_tags(matches: &ArgMatches) {
     }
 }
 
+fn set_link(matches: &ArgMatches) {
+    let name = matches.value_of("name").unwrap();
+    let pass = read_pass();
+    let link = matches.value_of("link");
+    match api::set_link(name, &pass, link) {
+            Err(s) => eprintln!("Error saving link for service {}: {}", name, s),
+            _ => {}
+    }
+}
+
 fn upgrade_cmd(matches: &ArgMatches) {
     let pass = read_pass();
     let name = matches.value_of("name").unwrap();
@@ -346,6 +357,12 @@ pub fn cli() {
                          .multiple(true)
                          .number_of_values(1))
                     .arg(arg_set_pass())
+                    .arg(Arg::with_name("link")
+                        .help("Optional link to include along with the service")
+                        .long("link")
+                        .takes_value(true)
+                        .required(false)
+                        .value_name("LINK"))
                     .display_order(10))
         .subcommand(SubCommand::with_name("get")
                     .about("Get password for service")
@@ -406,6 +423,15 @@ pub fn cli() {
                         .takes_value(false)
                         .help("Clear all existing values"))
                     .display_order(50))
+        .subcommand(SubCommand::with_name("set-link")
+                    .about("Set the link for the service")
+                    .arg(arg_name())
+                    .arg(Arg::with_name("link")
+                        .takes_value(true)
+                        .required(false)
+                        .value_name("LINK")
+                        .help("Link to set, or remove the existing link if not provided"))
+                    .display_order(50))
         .subcommand(SubCommand::with_name("upgrade")
                     .about("Upgrade password")
                     .arg(arg_name())
@@ -427,6 +453,7 @@ pub fn cli() {
         ("set-kv", Some(matches)) => setkv_cmd(matches),
         ("set-kv-id", Some(matches)) => setkv_id_cmd(matches),
         ("set-tags", Some(matches)) => set_tags(matches),
+        ("set-link", Some(matches)) => set_link(matches),
         ("upgrade", Some(matches)) => upgrade_cmd(matches),
         ("delete", Some(matches)) => delete_cmd(matches),
         
