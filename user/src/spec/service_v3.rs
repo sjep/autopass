@@ -148,6 +148,7 @@ impl ServiceEntryV3 {
 
     pub fn set_link(&mut self, link: Option<&str>) {
         self.link = link.map(|s| s.to_owned());
+        self.modify_time = super::now();
     }
 
     pub fn spec_type() -> super::SpecType {

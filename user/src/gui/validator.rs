@@ -93,7 +93,7 @@ impl Validator<String> for LengthBounds {
     }
 }
 
-pub fn textedit2<V: Validator<String>>(ui: &mut Ui, string: &mut String, validation: V, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> (Response, bool) {
+pub fn textedit2<V: Validator<String>>(ui: &mut Ui, string: &mut String, validation: &V, modify_textedit: impl FnOnce(TextEdit, bool) -> TextEdit) -> (Response, bool) {
     let resp = ui.scope(|ui| {
         match validation.valid(string) {
             Ok(()) => {

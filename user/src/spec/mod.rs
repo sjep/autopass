@@ -232,18 +232,13 @@ impl From<self::service_v1::ServiceEntryV1> for self::service_v3::ServiceEntryV3
 
 impl From<self::service_v2::ServiceEntryV2> for self::service_v3::ServiceEntryV3 {
     fn from(value: self::service_v2::ServiceEntryV2) -> Self {
-        let mut kv = vec![];
-        for (k, v) in value.kv {
-            kv.push((k, v));
-        }
-        kv.sort();
         Self {
             magic: SERVICE_MAGIC,
             name: value.name,
             pass: value.pass,
             nonce: value.nonce,
-            kv,
-            tags: Vec::new(),
+            kv: value.kv,
+            tags: value.tags,
             len: value.len,
             text_mode: value.text_mode,
             create_time: value.create_time,
